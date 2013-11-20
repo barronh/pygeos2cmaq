@@ -44,14 +44,18 @@ def output(out, outpath, config):
     for k in tmp.keys():
         tmp[k] = out.variables[k]
     for k, v in config['unitconversions']['metadefs'].iteritems():
-        exec('%s = %s' % (k, v), None, tmp)
+        exec('%s = %s' % (k, v), tmp, out.variables)
     
-    for vark, var in out.variables.items():
-        if hasattr(var, 'unitnow'):
-            expr = config['unitconversions']['%s->%s' % var.unitnow.strip(), var.units.strip()].replace('<value>', 'var')
-            exec('var[:] = %s', None, out.variables)
-            var.unitnow = var.units.strip()
-    
+    for vark, varo in out.variables.items():
+        if hasattr(varo, 'unitnow'):
+            if varo.unitnow.strip() != varo.units.strip():
+                expr = config['unitconversions']['%s->%s' % (varo.unitnow.strip(), varo.units.strip())].replace('<value>', 'varo')
+                exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
+                varo.history += ';' + expr.replace('varo', 'RESULT')
+                print varo.long_name, varo[:, 0].mean()
+
+            del varo.unitnow
+                
     pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
 
 def evalandunit(out, di, name, expr, variables):
@@ -63,25 +67,29 @@ def evalandunit(out, di, name, expr, variables):
     eval(expr, None, x)
     key = x.keys()[0]
     metavar = variables[key]
-    inunit = metavar.units.strip()
+    origunits = metavar.units.strip()
     outvar = out.variables[name]
-    outunit = outvar.units
+    outunit = outvar.units.strip()
     val = eval(expr, None, variables)
     outval = vinterp(val, sigmain, sigmaout)
-    unitnow = inunit
+    unitnow = origunits
+    outvar.history = expr
     if outunit in ('micrograms/m**3',):
-        outval *= metavar.kgpermol
-        unitnow = ('kg/mol*%s' % inunit).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
-    elif inunit in ('ppbC',):
+        outval *= metavar.kgpermole
+        outvar.history += '; RESULT * %s' % metavar.kgpermole
+        unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
+    elif origunits in ('ppbC',):
         outval /= metavar.carbon
         unitnow = 'ppbv'
+        outvar.history += '; RESULT / %s' % metavar.carbon
+    outvar.unitnow = unitnow
     outvar[di] += outval[0]
-    outvar.inunit = inunit
+    outvar.origunits = origunits
     for k in metavar.ncattrs():
         if k not in outvar.ncattrs():
             setattr(outvar, k, getattr(metavar, k))
 
-    return outval, inunit
+    return outval, origunits
     
 outval = None
 def vinterp(val, sigmain, sigmaout):
@@ -94,7 +102,19 @@ def vinterp(val, sigmain, sigmaout):
 
     for ti in range(val.shape[0]):
         for pi in range(val.shape[-1]):
-            outval[ti, ::-1, pi] = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi])
+            if sigmaout.max() > sigmain.max():
+                right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(sigmain[:2][::-1]) * (sigmaout[0] - sigmain[0])
+            else:
+                right = None
+            if sigmaout.min() > sigmain.min():
+                left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(sigmain[-2:][::-1]) * (sigmaout[-1] - sigmain[-1])
+            else:
+                left = None
+
+            outval[ti, ::-1, pi] = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi], left = None, right = None)
+            if (outval[ti, :, pi] < 0).any():
+                import pdb; pdb.set_trace()
+            
     return outval
 
 def make_out(config, dates):
@@ -114,6 +134,8 @@ def make_out(config, dates):
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
     for pk in metf.ncattrs():
         setattr(out, pk, getattr(metf, pk))
+    setattr(out, 'VAR-LIST', ''.join([name.ljust(16) for src, name, expr, unit in config['mappings']]))
+    setattr(out, 'NVARS', len(config['mappings']))
     var.long_name = 'TFLAG'.ljust(16);
     var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
     var.units = "<YYYYDDD,HHMMSS>"
