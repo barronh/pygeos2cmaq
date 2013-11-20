@@ -136,6 +136,10 @@ def make_out(config, dates):
         setattr(out, pk, getattr(metf, pk))
     setattr(out, 'VAR-LIST', ''.join([name.ljust(16) for src, name, expr, unit in config['mappings']]))
     setattr(out, 'NVARS', len(config['mappings']))
+    setattr(out, 'SDATE', int(dates[0].strftime('%Y%j')))
+    setattr(out, 'STIME', int(dates[0].strftime('%H%M%S')))
+    setattr(out, 'EDATE', int(dates[-1].strftime('%Y%j')))
+    setattr(out, 'ETIME', int(dates[-1].strftime('%H%M%S')))
     var.long_name = 'TFLAG'.ljust(16);
     var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
     var.units = "<YYYYDDD,HHMMSS>"
