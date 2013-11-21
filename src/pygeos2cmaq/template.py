@@ -1,5 +1,4 @@
-template_string = """
-# Start and End date, inclusive, will be output
+template_string = """# Start and End date, inclusive, will be output
 # in the boundary condition file using the time
 # increment descibed by time_incr.
 #
@@ -24,8 +23,7 @@ out_template: 'geos2cmaq.%%Y%%m%%d.nc'
 file_templates:
   - [bpch, 'testdata/ts%%Y%%m%%d.bpch', minus1hour]
   - [ioapi, 'testdata/METBDY3D_100101', simpledate]
-# Not currently supporting PROFILES
-#  - [profile, 'testdata/profile.dat', simpledate]
+  - [profile, 'testdata/profile.dat', simpledate]
 
 
 # GEOS-Chem species will automatically convert from
@@ -47,6 +45,10 @@ unitconversions:
     metadefs:
         AIRMOLPERM3: 1e6 * AIRDEN / 6.022E+23
         CM3PERMMOLEC: 1e6 /  AIRDEN
+# When AIRDEN is unavailable, use PRES and TA from METBDY
+# requires hourly PRES and TA
+#       AIRMOLPERM3: PRES / (8.314 * TA)
+#       CM3PERMMOLEC: ( 1.0E+12 * 8.314 / 6.022E+23 ) * TA / PRES
 
 # Mappings provide algebraic processing of GEOS-Chem
 # variables to make CMAQ variables, with unit processing

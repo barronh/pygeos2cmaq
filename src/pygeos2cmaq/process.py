@@ -27,7 +27,6 @@ def process(config):
             for src, name, expr, outunit in config['mappings']:
                 try:
                     grp = get_group(file_objs, src, date)
-                    time = grp.variables['time']
                     evalandunit(out, di, name, expr, grp.variables)
                 except Exception, e:
                     errors.add((src, name, expr))
@@ -61,8 +60,13 @@ def output(out, outpath, config):
 def evalandunit(out, di, name, expr, variables):
     sigmaout = out.VGLVLS
     sigmaout = sigmaout[:-1] + np.diff(sigmaout)
-    lay = variables['layer']
-    sigmain = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
+    if 'sigma-mid' in variables.keys():
+        sigmain = np.array(variables['sigma-mid']).repeat(2, 0)[1:-1].reshape(-1, 2).mean(1)
+    elif 'layer' in variables.keys():
+        lay = variables['layer']
+        sigmain = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
+    else:
+        raise KeyError('No sigma-mid or layer in %s' % str(variables.keys()))
     x = defaultdict(lambda: 1)
     eval(expr, None, x)
     key = x.keys()[0]
@@ -78,12 +82,15 @@ def evalandunit(out, di, name, expr, variables):
         outval *= metavar.kgpermole
         outvar.history += '; RESULT * %s' % metavar.kgpermole
         unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
+        
+        # Special case where profile is actually assumed to be in appropriate units
+        unitnow = unitnow.replace('kg/mol*ppmV', 'micrograms/m**3')
     elif origunits in ('ppbC',):
         outval /= metavar.carbon
         unitnow = 'ppbv'
         outvar.history += '; RESULT / %s' % metavar.carbon
     outvar.unitnow = unitnow
-    outvar[di] += outval[0]
+    outvar[di] += outval.squeeze()
     outvar.origunits = origunits
     for k in metavar.ncattrs():
         if k not in outvar.ncattrs():
@@ -177,7 +184,7 @@ def get_group(file_objs, src, date):
                     start_date = datetime.strptime(start_date)
                     thisdate = [start_date + timedelta(**{unit: t}) for t in time]
                 else:
-                    raise KeyError('needs TFLAG or time')
+                    return grp
                 idx, = np.where(np.array(thisdate) == date)[0]
                 grpt = slice_dim(grp, 'time,%d' % idx)
                 return grpt
@@ -198,6 +205,7 @@ def get_files(config, date, coordstr):
     Put date into file path and return open files
     """
     from PseudoNetCDF.sci_var import extract, slice_dim
+    from PseudoNetCDF.cmaqfiles.profile import profile
     global last_file_paths
     global file_objs
     global last_coordstr
@@ -226,11 +234,23 @@ def get_files(config, date, coordstr):
                 try:
                     nf = eval(r)(p)
                     if coordstr is not None:
-                        if hasattr(nf, 'groups'):
-                            for grpk, grpv in nf.groups.items():
-                                nf.groups[grpk] = extract(grpv, [coordstr])
+                        if isinstance(nf, profile):
+                            pnf = nf
+                            metf = file_objs[-1]
+                            nc, nr = metf.NCOLS, metf.NROWS
+                            nf.createDimension('PERIM', (nc + nr + 2) * 2)
+                            for k, v in nf.variables.items():
+                                if k in ('sigma', 'sigma-mid'): continue
+                                nv = np.concatenate([v[:, [0]].repeat(nc + 1, 1), v[:, [1]].repeat(nr + 1, 1), v[:, [2]].repeat(nc + 1, 1), v[:, [3]].repeat(nr + 1, 1)], axis = 1)
+                                vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
+                                nf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'PERIM'), values = nv[None,:], kgpermole = 1., **vard)
+                            nf.groups = dict(PROFILE = nf)
                         else:
-                            nf = extract(nf, [coordstr])
+                            if hasattr(nf, 'groups'):
+                                for grpk, grpv in nf.groups.items():
+                                    nf.groups[grpk] = extract(grpv, [coordstr])
+                            else:
+                                nf = extract(nf, [coordstr])
                 except Exception, e:
                     raise Exception("Could not open %s with %s: %s" % (p, r, str(e)))
             file_objs.append(nf)
