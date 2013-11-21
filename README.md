@@ -22,25 +22,18 @@ Program Steps:
 --------------
 
 1. Open a METBDY file
-
     * METBDY provides coordinates for horizontal and vertical interpolation
     * latitude/longitude are calculated by PseudoNetCDF
     * VGLVLS stores Sigma Levels by default
-
 2. Open a GEOS-Chem file
-    
     * latitude/longitude (and bounds) are calculated by PseudoNetCDF
     * sigma-eta levels are provided by PseudoNetCDF
-
 3. Find GEOS-Chem cells that belong to METBDY cells
-
     * Only cells from GEOS-Chem that overlap with METBDY are selected
     * Only variables that will be used are selected (including AIRDEN)
-
 4. Algebra is applied to map GEOS-Chem species to CMAQ
-
-
-5. Vertical interpolation is applied
+5. A "profile.dat" file fills in the gaps.
+6. Vertical interpolation is applied
 
 
 Install Instructions
