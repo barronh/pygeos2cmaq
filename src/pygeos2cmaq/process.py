@@ -78,18 +78,22 @@ def evalandunit(out, di, name, expr, variables):
     outval = vinterp(val, sigmain, sigmaout)
     unitnow = origunits
     outvar.history = expr
-    if outunit in ('micrograms/m**3',):
-        outval *= metavar.kgpermole
-        outvar.history += '; RESULT * %s' % metavar.kgpermole
-        unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
+    if unitnow == "None":
+        warn('No unit was provided; assuming CMAQ unit')
+        pass
+    else:
+        if outunit in ('micrograms/m**3',):
+            outval *= metavar.kgpermole
+            outvar.history += '; RESULT * %s' % metavar.kgpermole
+            unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
         
-        # Special case where profile is actually assumed to be in appropriate units
-        unitnow = unitnow.replace('kg/mol*ppmV', 'micrograms/m**3')
-    elif origunits in ('ppbC',):
-        outval /= metavar.carbon
-        unitnow = 'ppbv'
-        outvar.history += '; RESULT / %s' % metavar.carbon
-    outvar.unitnow = unitnow
+            # Special case where profile is actually assumed to be in appropriate units
+            unitnow = unitnow.replace('kg/mol*ppmV', 'micrograms/m**3')
+        elif origunits in ('ppbC',):
+            outval /= metavar.carbon
+            unitnow = 'ppbv'
+            outvar.history += '; RESULT / %s' % metavar.carbon
+        outvar.unitnow = unitnow
     outvar[di] += outval.squeeze()
     outvar.origunits = origunits
     for k in metavar.ncattrs():
