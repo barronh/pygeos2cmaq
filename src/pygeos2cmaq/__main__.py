@@ -1,5 +1,4 @@
 from optparse import OptionParser
-from pyPA.pappt.loader import LoadPyPAFromYAML, LoadPAQAFromYAML
 from glob import glob
 import os
 
@@ -11,7 +10,7 @@ def run():
     
     paths = glob(os.path.join(os.path.dirname(__file__), 'mapping', '*_*.yaml'))
     mechanisms = ', '.join(['_'.join(path.split('/')[-1].split('_')[1:])[:-5] for path in paths])
-    parser.add_option("-c", "--configuration", dest="configuration", default="template",
+    parser.add_option("-c", "--configuration", dest="configuration", default="%s/mapping/cb05cl_ae6_aq.csv" % os.path.dirname(__file__),
                         help="Chemical mechanisms: %s (for use with -t)" % mechanisms, metavar="CONFIG")
 
     (options, args) = parser.parse_args()

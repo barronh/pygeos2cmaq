@@ -11,6 +11,6 @@ setup(name = 'pygeos2cmaq',
       long_description="pygeos2cmaq creates boundary conditions from GEOS-Chem for CMAQ.",
       packages = ['pygeos2cmaq'],
       package_dir = {'pygeos2cmaq': 'src/pygeos2cmaq'},
-      package_data = {'pygeos2cmaq.mapping': ['*.csv']},
+      package_data = {'pygeos2cmaq': ['mapping/*.csv']},
       install_requires = ['numpy', 'scipy', 'PseudoNetCDF', 'pyyaml']
       )
