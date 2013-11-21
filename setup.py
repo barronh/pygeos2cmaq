@@ -12,5 +12,5 @@ setup(name = 'pygeos2cmaq',
       packages = ['pygeos2cmaq'],
       package_dir = {'pygeos2cmaq': 'src/pygeos2cmaq'},
       package_data = {'pygeos2cmaq.mapping': ['*.csv']},
-      install_requires = ['numpy', 'scipy', 'PseudoNetCDF', 'yaml']
+      install_requires = ['numpy', 'scipy', 'PseudoNetCDF', 'pyyaml']
       )
