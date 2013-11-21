@@ -16,7 +16,7 @@ def run():
     (options, args) = parser.parse_args()
     if options.template:
         from template import template
-        template(options.configuration)
+        print template(options.configuration)
         parser.exit()
     if len(args)<1:
         parser.error(msg="Requires a yaml file as an argument.  For a template use the -t option.  The template will be output to the stdout.")
