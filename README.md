@@ -44,7 +44,7 @@ Install Instructions
   2. Open DOS command prompt (start run -> type "cmd" -> hit enter
   3. type "pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
 2. Mac OSX
-  1. Install the Enthough Python Distribution
+  1. Install the Anaconda Python Distribution
   2. Install following "Get Pip" instructions at http://www.pip-installer.org/en/latest/installing.html
   3. Open a Terminal
   4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
@@ -54,4 +54,3 @@ Install Instructions
   3. sudo apt-get install python-pip
   3. sudo pip install http://cheeseshop.python.org/packages/source/p/pyparsing/pyparsing-1.5.5.tar.gz
   4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
-
