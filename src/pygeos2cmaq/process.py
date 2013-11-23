@@ -67,20 +67,23 @@ def output(out, outpath, config):
         tmp[k] = out.variables[k]
     for k, v in config['unitconversions']['metadefs'].iteritems():
         exec('%s = %s' % (k, v), tmp, out.variables)
-    
+    print 'Vertical profile Low -> High'
     for vark, varo in out.variables.items():
         if hasattr(varo, 'unitnow'):
             if varo.unitnow.strip() != varo.units.strip():
                 expr = config['unitconversions']['%s->%s' % (varo.unitnow.strip(), varo.units.strip())].replace('<value>', 'varo')
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
-                print varo.long_name, varo[:, 0].mean()
+                print varo.long_name, varo[:, :].mean(0).mean(1)
+                if (varo[:, :] < 0).any():
+                    warn(vark + ' has negative values')
 
             del varo.unitnow
                 
     f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    f.sync()
     f.close()
-    del f, out
+    #del f, out
 
 def evalandunit(out, di, name, expr, variables, verbose = False):
     sigmaout = out.VGLVLS
@@ -156,9 +159,6 @@ def vinterp(val, sigmain, sigmaout):
                 testval = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi], left = left, right = right)[::-1]
                 np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
             
-    #             outval[ti, :, pi] = testval
-    if (outval[:] < 0).any():
-        import pdb; pdb.set_trace()
 
     return outval
 
@@ -175,6 +175,12 @@ def make_out(config, dates):
     out.createDimension('PERIM', len(metf.dimensions['PERIM']))
     out.createDimension('DATE-TIME', len(metf.dimensions['DATE-TIME']))
     out.createDimension('VAR', len(config['mappings']))
+    mlat = metf.variables['latitude']
+    lat = out.createVariable('latitude', 'f', ('PERIM',), units = mlat.units, values = mlat[:])
+
+    mlon = metf.variables['longitude']
+    lon = out.createVariable('longitude', 'f', ('PERIM',), units = mlon.units, values = mlon[:])
+
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
     for pk in metf.ncattrs():
         setattr(out, pk, getattr(metf, pk))
@@ -192,9 +198,7 @@ def make_out(config, dates):
         var.long_name = name.ljust(16);
         var.var_desc = name.ljust(80);
         var.units = outunit.ljust(16)
-    lon = metf.variables['longitude']
-    lat = metf.variables['latitude']
-    out.lonlatcoords = '/'.join(['%s,%s' % (o, a) for o, a in zip(lon, lat)])
+    out.lonlatcoords = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon, mlat)])
     return out
 
 def get_group(file_objs, src, dates):
