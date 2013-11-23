@@ -122,6 +122,9 @@ def repair_ae(f):
             break
         except:
             pass
+    else:
+        warn("There are no aerosol species")
+        return
     not_found = defaultdict(lambda: [])
     for spc in bcspcs:
         try:
