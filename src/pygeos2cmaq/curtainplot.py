@@ -60,10 +60,14 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
     f = MFDataset(paths)
+    press = f.VGLVLS * (101325. - f.VGTOP) + f.VGTOP
+    logp = np.log(press)
+    VERTCRD = f.VGLVLS
+    reversevert = not (np.diff(VERTCRD) > 0).all()
     for var_name in keys:
         var = eval(var_name, None, f.variables)[:]
         if func == 'each':
-            vars = [(vi, v) for vi, v in enumerate(var)]
+            vars = [('time%02d' % vi, v) for vi, v in enumerate(var)]
         else:
             vars = [(func, getattr(np, func)(var, axis = 0))]
         for func, var in vars:
@@ -118,39 +122,39 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                      
             x = f.NCOLS + 1
             y = f.NROWS + 1
-            X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, f.VGLVLS)
+            X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, VERTCRD)
             patchess = axs.pcolor(X, Y, var[:, :x-1], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             if not map:
-                axs.set_ylim(*axs.get_ylim()[::-1])
-                axs.set_xlim(*axs.get_xlim()[::-1])
+                if reversevert: axs.set_ylim(*axs.get_ylim()[::-1])
+                if reversevert: axs.set_xlim(*axs.get_xlim()[::-1])
                 axs.set_title('South')
                 axs.set_xlabel('E to W km')
         
-            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, f.VGLVLS)
+            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, VERTCRD)
             patchesn = axn.pcolor(X, Y, var[:, x+y:x+y+x], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
-            axn.set_ylim(*axn.get_ylim()[::-1])
+            if reversevert: axn.set_ylim(*axn.get_ylim()[::-1])
             if not map:
                 axn.set_title('North')
                 axn.set_xlabel('W to E km')
 
             if map:
-                X, Y = np.meshgrid(f.VGLVLS, np.arange(y) * f.YCELL)
+                X, Y = np.meshgrid(VERTCRD, np.arange(y) * f.YCELL)
                 patchese = axe.pcolor(X, Y, var[:, x:x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
-                axe.set_xlim(*axe.get_xlim()[::-1])
+                if reversevert: axe.set_xlim(*axe.get_xlim()[::-1])
             else:
-                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, f.VGLVLS)
+                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, VERTCRD)
                 patchese = axe.pcolor(X, Y, var[:, x:x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
-                axe.set_ylim(*axe.get_ylim()[::-1])
+                if reversevert: axe.set_ylim(*axe.get_ylim()[::-1])
                 axe.set_title('East')
                 axe.set_xlabel('N to S km')
                 axe.set_xlim(*axe.get_xlim()[::-1])
             if map:
-                X, Y = np.meshgrid(f.VGLVLS, np.arange(y) * f.YCELL)
+                X, Y = np.meshgrid(VERTCRD, np.arange(y) * f.YCELL)
                 patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             else:
-                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, f.VGLVLS)
+                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, VERTCRD)
                 patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
-                axw.set_ylim(*axw.get_ylim()[::-1])
+                if reversevert: axw.set_ylim(*axw.get_ylim()[::-1])
                 axw.set_title('West')
                 axw.set_xlabel('S to N km')
 
@@ -167,7 +171,7 @@ if __name__ == '__main__':
     
     """)
 
-    parser.add_option("-v", "--variables", dest = "variables", action = "append", default = ["O3"],
+    parser.add_option("-v", "--variables", dest = "variables", action = "append", default = [],
                         help = "Variable names separated by ','")
 
     parser.add_option("-p", "--prefix", dest = "prefix", type = "string", default = None,
@@ -195,4 +199,6 @@ if __name__ == '__main__':
         exit()
     if options.prefix is None:
         options.prefix = args[0]
+    if len(options.variables) == 0:
+        options.variables = ['O3']
     plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), map = not options.nomap, prefix = options.prefix, func = options.timefunc, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq))
