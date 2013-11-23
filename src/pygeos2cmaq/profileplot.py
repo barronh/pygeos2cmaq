@@ -12,7 +12,13 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
     f = MFDataset(paths)
-    logp = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
+    try:
+        vertcrd = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
+    except:
+        lay = f.variables['layer_edges'][:]
+        vertcrd = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
+        vertcrd = vertcrd[:-1] + np.diff(vertcrd) / 2
+
     geosls = '-'
     geoscolor = 'k'
     geosrangecolor = 'k'
@@ -22,11 +28,15 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     print keys
     for var_name in keys:
             temp = defaultdict(lambda: 1)
-            eval(var_name, None, temp)
-            var = eval(var_name, None, f.variables)[:]
+            try:
+                eval(var_name, None, temp)
+                var = eval(var_name, None, f.variables)[:]
+            except:
+                temp[var_name]
+                var = f.variables[var_name][:]
+            
             unit = f.variables[temp.keys()[0]].units.strip()
             var = unitconvert.get((unit, outunit), lambda x: x)(var)
-            print var.min(), var.max()
             bmap = None
             vmin, vmax = np.percentile(np.ma.compressed(var).ravel(), list(minmaxq))
             if minmax[0] is not None:
@@ -35,14 +45,13 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
                 vmax = minmax[1]
             fig = pl.figure(figsize = (16, 4))
             ax = fig.add_subplot(1,1,1)
-            import pdb; pdb.set_trace()
-            minval = var[:].min(0).min(1)
-            meanval = var[:].mean(0).mean(1)
-            maxval = var[:].max(0).max(1)
-            modline = ax.plot(meanval, logp, ls = geosls, lw = 2, color = geoscolor, label = r'GC $\mathbf{\hat{y}}^{i,m}_t$', zorder = 4)
+            minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
+            meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
+            maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
+            modline = ax.plot(meanval, vertcrd, ls = geosls, lw = 2, color = geoscolor, label = r'GC $\mathbf{\hat{y}}^{i,m}_t$', zorder = 4)
 
-            x = np.ma.concatenate([minval[:logp.size], maxval[:logp.size][::-1]])
-            y = np.ma.concatenate([logp[:], logp[::-1]])
+            x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
+            y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
             mask = x.mask | y.mask
             x = np.ma.masked_where(mask, x).compressed()
             y = np.ma.masked_where(mask, y).compressed()
@@ -52,7 +61,7 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             ax.set_xlim(vmin, vmax)
             #if scale == 'log':
             #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
-            fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'sonde'))
+            fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'profile'))
             pl.close(fig)
     return fig
     
@@ -65,7 +74,7 @@ if __name__ == '__main__':
     
     """)
 
-    parser.add_option("-v", "--variables", dest = "variables", action = "append", default = ["O3"],
+    parser.add_option("-v", "--variables", dest = "variables", action = "append", default = [],
                         help = "Variable names separated by ','")
 
     parser.add_option("-p", "--prefix", dest = "prefix", type = "string", default = None,
@@ -93,4 +102,6 @@ if __name__ == '__main__':
         exit()
     if options.prefix is None:
         options.prefix = args[0]
+    if len(options.variables) == 0:
+        options.variables = ['O3']
     fig = plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq))
