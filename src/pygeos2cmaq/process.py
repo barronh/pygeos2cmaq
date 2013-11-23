@@ -55,15 +55,20 @@ def process(config, verbose = False):
                 evalandunit(out, curdate, name, expr, grp.variables, verbose = verbose)
                 if verbose: timeit('EVALUNIT', False)
             except Exception, e:
-                errors.add((src, name, expr))
+                errors.add((src, name, expr, str(e)))
                 warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
         curdate += len(file_objs[0].dimensions['time'])
         output(out, outpath, config)
     if len(errors) > 0:
-        print '***********'
-        print '****Errors:'
-    for src, name, expr in errors:
-        print src, name, expr
+        print '******************'
+        print '**** Start Errors:'
+        print '******************'
+    for src, name, expr, err in errors:
+        print src, name, expr, err
+    if len(errors) > 0:
+        print '******************'
+        print '**** End Errors:'
+        print '******************'
 def output(out, outpath, config):
     """
     """
@@ -102,16 +107,23 @@ def output(out, outpath, config):
         f.close()
     #del f, out
 
+def pres_from_sigma(sigma, pref, ptop, avg = False):
+    pres = sigma * (pref - ptop) + ptop
+    if avg:
+        pres = pres[:-1] + np.diff(pres) / 2.
+    return pres
+    
 def evalandunit(out, di, name, expr, variables, verbose = False):
-    sigmaout = out.VGLVLS
-    sigmaout = sigmaout[:-1] + np.diff(sigmaout)
+    pref = 101325.
+    vert_out = pres_from_sigma(out.VGLVLS, pref, out.VGTOP, avg = True)
     if 'sigma-mid' in variables.keys():
-        sigmain = np.array(variables['sigma-mid']).repeat(2, 0)[1:-1].reshape(-1, 2).mean(1)
+        sigma = np.array(variables['sigma-mid']).repeat(2, 0)[1:-1].reshape(-1, 2).mean(1)
+        vert_in = pres_from_sigma(sigma, pref, out.VGTOP)
     elif 'layer' in variables.keys():
-        lay = variables['layer']
-        sigmain = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
+        vert_in = variables['layer'] * 100.
     else:
         raise KeyError('No sigma-mid or layer in %s' % str(variables.keys()))
+    
     x = defaultdict(lambda: 1)
     eval(expr, None, x)
     key = x.keys()[0]
@@ -121,7 +133,7 @@ def evalandunit(out, di, name, expr, variables, verbose = False):
     outunit = outvar.units.strip()
     val = eval(expr, None, variables)
     if verbose: timeit('VINTERP', True)
-    outval = vinterp(val, sigmain, sigmaout)
+    outval = vinterp(val, vert_in, vert_out)
     if verbose: timeit('VINTERP', False)
     unitnow = origunits
     outvar.history = expr
@@ -149,31 +161,35 @@ def evalandunit(out, di, name, expr, variables, verbose = False):
     return outval, origunits
     
 outval = np.zeros((0,))
-def vinterp(val, sigmain, sigmaout):
+def vinterp(val, vert_in, vert_out):
     """
     Performs vertical interpolation using linear algorithms
     """
     global outval
     if (outval.shape[0], outval.shape[-1]) != (val.shape[0], val.shape[-1]):
-        outval = zeros((val.shape[0], len(sigmaout), val.shape[-1]), dtype = val.dtype)
-    w = get_interp_w(sigmain, sigmaout)
+        outval = zeros((val.shape[0], len(vert_out), val.shape[-1]), dtype = val.dtype)
+    w = get_interp_w(vert_in, vert_out)
     newvals = (w[:, :, None, None] * val[:].swapaxes(0, 1)[None, :]).sum(1).swapaxes(0, 1)
+    import pdb; pdb.set_trace()
     outval[:, :, :] = newvals
-    if not len(sigmain) == 6:
+    if not len(vert_in) == 6:
         for ti in [0, val.shape[0] - 1]:
             for pi in [0, val.shape[-1] - 1]:
-                if sigmaout.max() > sigmain.max():
-                    right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(sigmain[:2][::-1]) * (sigmaout[0] - sigmain[0])
+                if vert_out.max() > vert_in.max():
+                    right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(vert_in[:2][::-1]) * (vert_out[0] - vert_in[0])
                 else:
                     right = None
             
-                if sigmaout.min() > sigmain.min():
-                    left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(sigmain[-2:][::-1]) * (sigmaout[-1] - sigmain[-1])
+                if vert_out.min() > vert_in.min():
+                    left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(vert_in[-2:][::-1]) * (vert_out[-1] - vert_in[-1])
                 else:
                     left = None
             
-                testval = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi], left = left, right = right)[::-1]
-                np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
+                testval = np.interp(vert_out[::-1], vert_in[:val.shape[1]][::-1], val[ti, ::-1, pi], left = left, right = right)[::-1]
+                try:
+                    np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
+                except Exception, e:
+                    warn(str(e))
             
 
     return outval
