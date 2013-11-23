@@ -4,35 +4,58 @@ import numpy as np
 from numpy import *
 from readers import *
 from datetime import datetime, timedelta
+from fast_interp import get_interp_w
+from PseudoNetCDF import PseudoNetCDFFile
 
-def process(config):
+def timeit(name, new):
+    from time import time
+    if new:
+        timeit.ts.append(time())
+        timeit.names.append(name)
+        print name
+    else:
+        print '***%s min:' % timeit.names.pop(-1), (time() - timeit.ts.pop(-1)) / 60
+timeit.ts = []
+timeit.names = []
+def process(config, verbose = False):
     """
     Take the configuration file and create boundaries
     """
     alldates = get_dates(config)
     outpaths = defaultdict(lambda: [])
+    outpathtemp, tsf = config['out_template']
     for date in alldates:
-        outpaths[date.strftime(config['out_template'])].append(date)
+        outpaths[eval(tsf)(date, outpathtemp)].append(date)
     outpaths = [(k, v) for k, v in outpaths.iteritems()]
     outpaths.sort()
     errors = set()
     for outpath, dates in outpaths:
+        print outpath
         out = make_out(config, dates)
         tflag = out.variables['TFLAG']
+        curdate = 0
         for di, date in enumerate(dates):
             file_objs = get_files(config, date, out.lonlatcoords)
             jday = int(date.strftime('%Y%j'))
             itime = int(date.strftime('%H%M%S'))
             tflag[di, :, :] = np.array([[jday, itime]])
-            for src, name, expr, outunit in config['mappings']:
-                try:
-                    grp = get_group(file_objs, src, date)
-                    evalandunit(out, di, name, expr, grp.variables)
-                except Exception, e:
-                    errors.add((src, name, expr))
-                    warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)))
+        for src, name, expr, outunit in config['mappings']:
+            print '\t'+name
+            try:
+                grp = get_group(file_objs, src, dates)
+                if verbose: timeit('EVALUNIT', True)
+                evalandunit(out, curdate, name, expr, grp.variables, verbose = verbose)
+                if verbose: timeit('EVALUNIT', False)
+            except Exception, e:
+                errors.add((src, name, expr))
+                warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)))
+        curdate += len(file_objs[0].dimensions['time'])
         output(out, outpath, config)
-
+    if len(errors) > 0:
+        print '***********'
+        print '****Errors:'
+    for src, name, expr in errors:
+        print src, name, expr
 def output(out, outpath, config):
     """
     """
@@ -55,9 +78,11 @@ def output(out, outpath, config):
 
             del varo.unitnow
                 
-    pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    f.close()
+    del f, out
 
-def evalandunit(out, di, name, expr, variables):
+def evalandunit(out, di, name, expr, variables, verbose = False):
     sigmaout = out.VGLVLS
     sigmaout = sigmaout[:-1] + np.diff(sigmaout)
     if 'sigma-mid' in variables.keys():
@@ -75,7 +100,9 @@ def evalandunit(out, di, name, expr, variables):
     outvar = out.variables[name]
     outunit = outvar.units.strip()
     val = eval(expr, None, variables)
+    if verbose: timeit('VINTERP', True)
     outval = vinterp(val, sigmain, sigmaout)
+    if verbose: timeit('VINTERP', False)
     unitnow = origunits
     outvar.history = expr
     if unitnow == "None":
@@ -94,7 +121,7 @@ def evalandunit(out, di, name, expr, variables):
             unitnow = 'ppbv'
             outvar.history += '; RESULT / %s' % metavar.carbon
         outvar.unitnow = unitnow
-    outvar[di] += outval.squeeze()
+    outvar[di:di + outvar.shape[0]] += outval.squeeze()
     outvar.origunits = origunits
     for k in metavar.ncattrs():
         if k not in outvar.ncattrs():
@@ -102,37 +129,43 @@ def evalandunit(out, di, name, expr, variables):
 
     return outval, origunits
     
-outval = None
+outval = np.zeros((0,))
 def vinterp(val, sigmain, sigmaout):
     """
     Performs vertical interpolation using linear algorithms
     """
     global outval
-    if outval is None:
+    if (outval.shape[0], outval.shape[-1]) != (val.shape[0], val.shape[-1]):
         outval = zeros((val.shape[0], len(sigmaout), val.shape[-1]), dtype = val.dtype)
-
-    for ti in range(val.shape[0]):
-        for pi in range(val.shape[-1]):
-            if sigmaout.max() > sigmain.max():
-                right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(sigmain[:2][::-1]) * (sigmaout[0] - sigmain[0])
-            else:
-                right = None
-            if sigmaout.min() > sigmain.min():
-                left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(sigmain[-2:][::-1]) * (sigmaout[-1] - sigmain[-1])
-            else:
-                left = None
-
-            outval[ti, ::-1, pi] = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi], left = None, right = None)
-            if (outval[ti, :, pi] < 0).any():
-                import pdb; pdb.set_trace()
+    w = get_interp_w(sigmain, sigmaout)
+    newvals = (w[:, :, None, None] * val[:].swapaxes(0, 1)[None, :]).sum(1).swapaxes(0, 1)
+    outval[:, :, :] = newvals
+    if not len(sigmain) == 6:
+        for ti in [0, val.shape[0] - 1]:
+            for pi in [0, val.shape[-1] - 1]:
+                if sigmaout.max() > sigmain.max():
+                    right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(sigmain[:2][::-1]) * (sigmaout[0] - sigmain[0])
+                else:
+                    right = None
             
+                if sigmaout.min() > sigmain.min():
+                    left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(sigmain[-2:][::-1]) * (sigmaout[-1] - sigmain[-1])
+                else:
+                    left = None
+            
+                testval = np.interp(sigmaout[::-1], sigmain[:val.shape[1]][::-1], val[ti, ::-1, pi], left = left, right = right)[::-1]
+                np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
+            
+    #             outval[ti, :, pi] = testval
+    if (outval[:] < 0).any():
+        import pdb; pdb.set_trace()
+
     return outval
 
 def make_out(config, dates):
     """
     Return a file to fill with data
     """
-    from PseudoNetCDF import PseudoNetCDFFile
     out = PseudoNetCDFFile()
     file_objs = get_files(config, dates[0], None)
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
@@ -164,7 +197,7 @@ def make_out(config, dates):
     out.lonlatcoords = '/'.join(['%s,%s' % (o, a) for o, a in zip(lon, lat)])
     return out
 
-def get_group(file_objs, src, date):
+def get_group(file_objs, src, dates):
     """
     Return the first file with the SRC group
     """
@@ -189,8 +222,9 @@ def get_group(file_objs, src, date):
                     thisdate = [start_date + timedelta(**{unit: t}) for t in time]
                 else:
                     return grp
-                idx, = np.where(np.array(thisdate) == date)[0]
-                grpt = slice_dim(grp, 'time,%d' % idx)
+                thisdate = np.array(thisdate)
+                idx, = np.where(np.logical_and(thisdate >= dates[0], thisdate <= dates[-1]))
+                grpt = slice_dim(grp, 'time,%d,%d' % (idx[0], idx[-1] + 1))
                 return grpt
                 
     else:
@@ -201,24 +235,25 @@ def simpledate(date, p):
 def minus1hour(date, p):
     return (date - timedelta(hours = 1)).strftime(p)
 
-last_file_paths = []
-last_file_objs = []
-last_coordstr = ""
+last_coordstr = "-1-"
 def get_files(config, date, coordstr):
     """
     Put date into file path and return open files
     """
-    from PseudoNetCDF.sci_var import extract, slice_dim
+    from PseudoNetCDF.sci_var import extract, slice_dim, getvarpnc
     from PseudoNetCDF.cmaqfiles.profile import profile
+    import gc
     global last_file_paths
     global file_objs
     global last_coordstr
-    if coordstr != last_coordstr:
-        last_file_paths = []
-        last_file_objs = []
+    global last_file_objs
     file_paths = [(r, eval(tsf)(date, p)) for r, p, tsf in config['file_templates']]
+    if coordstr != last_coordstr:
+        last_file_paths = [''] * len(file_paths)
+        last_file_objs = [PseudoNetCDFFile()] * len(file_paths)
+        gc.collect()
     if file_paths == last_file_paths:
-        return file_objs
+        return last_file_objs
     else:
         if coordstr is not None:
             print 
@@ -226,21 +261,17 @@ def get_files(config, date, coordstr):
             print "Getting files for", date
             print '-' * 40
             print 
-        file_objs = []
         for fi, (r, p) in enumerate(file_paths):
-            if fi < len(last_file_paths):
-                lp = last_file_paths[fi]
-            else:
-                lp = ''
-            if p == lp:
-                nf = last_file_objs[fi]
-            else:
+            lp = last_file_paths[fi]
+            nf = last_file_objs[fi]
+            if p != lp:
                 try:
-                    nf = eval(r)(p)
+                    nf.close()
+                    onf = nf = eval(r)(p)
                     if coordstr is not None:
                         if isinstance(nf, profile):
                             pnf = nf
-                            metf = file_objs[-1]
+                            metf = [f for f in last_file_objs if 'PERIM' in f.dimensions][0]
                             nc, nr = metf.NCOLS, metf.NROWS
                             nf.createDimension('PERIM', (nc + nr + 2) * 2)
                             for k, v in nf.variables.items():
@@ -255,13 +286,19 @@ def get_files(config, date, coordstr):
                                     nf.groups[grpk] = extract(grpv, [coordstr])
                             else:
                                 nf = extract(nf, [coordstr])
+                    else:
+                        nf = getvarpnc(onf, 'time TFLAG latitude longitude'.split())
+                    if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
+                        nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
+                        nf.createDimension('LAY', len(onf.dimensions['LAY']))
+                        nf.NCOLS = onf.NCOLS
+                        nf.NROWS = onf.NROWS
                 except Exception, e:
                     raise Exception("Could not open %s with %s: %s" % (p, r, str(e)))
-            file_objs.append(nf)
+            last_file_objs[fi] = nf
         last_file_paths = file_paths
-        last_file_objs = file_objs
         last_coordstr = coordstr
-        return file_objs
+        return last_file_objs
 
 def get_dates(config):
     """

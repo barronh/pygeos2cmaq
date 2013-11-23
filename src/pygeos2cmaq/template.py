@@ -4,13 +4,14 @@ template_string = """# Start and End date, inclusive, will be output
 #
 # start_date and end_date in the form YYYY-MM-DD HH:MM:SS
 # time_incr in the form val units (units must be plural, e.g., hours, seconds)
-start_date: '2010-01-01 23:00:00'
-end_date:   '2010-01-02 01:00:00'
+start_date: '2010-01-01 01:00:00'
+end_date:   '2010-01-03 00:00:00'
 time_incr: 1 hours
 
 # Output files are stored in files matching
 # the out_template
-out_template: 'geos2cmaq.%%Y%%m%%d.nc'
+out_template: ['geos2cmaq.%%Y%%m%%d.nc', minus1hour]
+
 
 # Files used by pygeos2cmaq will be found based on the patterns
 # below after converting current date using a function and
