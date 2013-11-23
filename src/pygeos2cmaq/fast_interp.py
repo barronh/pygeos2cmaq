@@ -38,6 +38,7 @@ def get_interp_w(x, xn):
             w[i, 0] = pct_dx[i, 0]
             w[i, 1] = 1 - w[i, 0]
     w = w.filled(0)
+    np.testing.assert_allclose(w.sum(1), 1)
     if reverse:
         w = w[::-1, ::-1]
     return w
