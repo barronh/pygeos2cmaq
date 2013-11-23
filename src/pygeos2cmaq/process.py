@@ -95,10 +95,11 @@ def output(out, outpath, config):
     f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
     f.sync()
     f.close()
-    f = Dataset(outpath, 'r+')
-    repair_ae(f)
-    f.sync()
-    f.close()
+    if config['repair_aero']:
+        f = Dataset(outpath, 'r+')
+        repair_ae(f)
+        f.sync()
+        f.close()
     #del f, out
 
 def evalandunit(out, di, name, expr, variables, verbose = False):
@@ -125,8 +126,7 @@ def evalandunit(out, di, name, expr, variables, verbose = False):
     unitnow = origunits
     outvar.history = expr
     if unitnow == "None":
-        warn('No unit was provided; assuming CMAQ unit', stacklevel = 1)
-        pass
+        warn('No unit was provided; assuming CMAQ unit; Most likely from PROFILE', stacklevel = 1)
     else:
         if outunit in ('micrograms/m**3',):
             outval *= metavar.kgpermole
@@ -307,7 +307,9 @@ def get_files(config, date, coordstr):
                             else:
                                 nf = extract(nf, [coordstr])
                     else:
-                        nf = getvarpnc(onf, 'time TFLAG latitude longitude'.split())
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            nf = getvarpnc(onf, 'time TFLAG latitude longitude'.split())
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
