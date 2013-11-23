@@ -1,4 +1,12 @@
-from warnings import warn
+import warnings
+
+def formatwarning(message, category, filename, lineno, line = 0):
+    strout = "\n***********\n%s:%s: %s:\n\t%s\n***********\n" % (filename, lineno, category.__name__, message)
+    return strout
+
+warnings.formatwarning = formatwarning
+
+warn = warnings.warn
 from collections import defaultdict
 import numpy as np
 from numpy import *
@@ -48,7 +56,7 @@ def process(config, verbose = False):
                 if verbose: timeit('EVALUNIT', False)
             except Exception, e:
                 errors.add((src, name, expr))
-                warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)))
+                warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
         curdate += len(file_objs[0].dimensions['time'])
         output(out, outpath, config)
     if len(errors) > 0:
@@ -59,6 +67,8 @@ def process(config, verbose = False):
 def output(out, outpath, config):
     """
     """
+    from netCDF4 import Dataset
+    from repair_ae import repair_ae
     from PseudoNetCDF.pncgen import pncgen
     tmp = defaultdict(lambda: 1)
     for k, v in config['unitconversions']['metadefs'].iteritems():
@@ -68,19 +78,25 @@ def output(out, outpath, config):
     for k, v in config['unitconversions']['metadefs'].iteritems():
         exec('%s = %s' % (k, v), tmp, out.variables)
     print 'Vertical profile Low -> High'
+    np.set_printoptions(precision = 2)
     for vark, varo in out.variables.items():
         if hasattr(varo, 'unitnow'):
             if varo.unitnow.strip() != varo.units.strip():
                 expr = config['unitconversions']['%s->%s' % (varo.unitnow.strip(), varo.units.strip())].replace('<value>', 'varo')
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
-                print varo.long_name, varo[:, :].mean(0).mean(1)
                 if (varo[:, :] < 0).any():
-                    warn(vark + ' has negative values')
-
+                    warn(vark + ' has negative values', stacklevel = 1)
             del varo.unitnow
-                
+        if 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
+            print vark, varo[:, :].mean(0).mean(1)
+    np.set_printoptions(precision = None)
+    
     f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    f.sync()
+    f.close()
+    f = Dataset(outpath, 'r+')
+    repair_ae(f)
     f.sync()
     f.close()
     #del f, out
@@ -109,7 +125,7 @@ def evalandunit(out, di, name, expr, variables, verbose = False):
     unitnow = origunits
     outvar.history = expr
     if unitnow == "None":
-        warn('No unit was provided; assuming CMAQ unit')
+        warn('No unit was provided; assuming CMAQ unit', stacklevel = 1)
         pass
     else:
         if outunit in ('micrograms/m**3',):

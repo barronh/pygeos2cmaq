@@ -12,6 +12,9 @@ time_incr: 1 hours
 # the out_template
 out_template: ['geos2cmaq.%%Y%%m%%d.nc', minus1hour]
 
+# Aerosol surface area and number concentration
+# can be updated to be consistent with concentrations
+repair_aero: True
 
 # Files used by pygeos2cmaq will be found based on the patterns
 # below after converting current date using a function and
