@@ -17,6 +17,7 @@ def loader(config = 'config.yaml'):
     config_dict.setdefault('time_incr', '1 hours')
     exec('time_incr = timedelta(%s = %s)' % tuple(config_dict['time_incr'].split(' ')[::-1]), None, config_dict)
     config_dict.setdefault('repair_aero', True)
+    config_dict.setdefault('zero_negs', True)
     return config_dict
 
 if __name__ == '__main__':

@@ -91,7 +91,11 @@ def output(out, outpath, config):
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
                 if (varo[:, :] < 0).any():
-                    warn(vark + ' has negative values', stacklevel = 1)
+                    if config['zero-negs']:
+                        varo[np.where(varo[:] < 0)] = 0.
+                        warn(vark + ' negative values were set to zero', stacklevel = 1)
+                    else:
+                        warn(vark + ' has negative values', stacklevel = 1)
             del varo.unitnow
         if 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
             print vark, varo[:, :].mean(0).mean(1)
@@ -170,9 +174,8 @@ def vinterp(val, vert_in, vert_out):
         outval = zeros((val.shape[0], len(vert_out), val.shape[-1]), dtype = val.dtype)
     w = get_interp_w(vert_in, vert_out)
     newvals = (w[:, :, None, None] * val[:].swapaxes(0, 1)[None, :]).sum(1).swapaxes(0, 1)
-    import pdb; pdb.set_trace()
     outval[:, :, :] = newvals
-    if not len(vert_in) == 6:
+    if not (vert_out.max() > vert_in.max() or vert_out.min() < vert_in.min()):
         for ti in [0, val.shape[0] - 1]:
             for pi in [0, val.shape[-1] - 1]:
                 if vert_out.max() > vert_in.max():
