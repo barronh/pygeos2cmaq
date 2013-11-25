@@ -1,12 +1,4 @@
 import warnings
-
-def formatwarning(message, category, filename, lineno, line = 0):
-    strout = "\n***********\n%s:%s: %s:\n\t%s\n***********\n" % (filename, lineno, category.__name__, message)
-    return strout
-
-warnings.formatwarning = formatwarning
-
-warn = warnings.warn
 from collections import defaultdict
 import numpy as np
 from numpy import *
@@ -15,6 +7,11 @@ from datetime import datetime, timedelta
 from fast_interp import get_interp_w
 from PseudoNetCDF import PseudoNetCDFFile
 
+from myio import myio
+myioo = myio()
+warn = myioo.warn
+status = myioo.status
+error = myioo.error
 def timeit(name, new):
     from time import time
     if new:
@@ -38,7 +35,7 @@ def process(config, verbose = False):
     outpaths.sort()
     errors = set()
     for outpath, dates in outpaths:
-        print outpath
+        status(outpath)
         out = make_out(config, dates)
         tflag = out.variables['TFLAG']
         curdate = 0
@@ -48,7 +45,7 @@ def process(config, verbose = False):
             itime = int(date.strftime('%H%M%S'))
             tflag[di, :, :] = np.array([[jday, itime]])
         for src, name, expr, outunit in config['mappings']:
-            print '\t'+name
+            status('\t'+name)
             try:
                 grp = get_group(file_objs, src, dates)
                 if verbose: timeit('EVALUNIT', True)
@@ -56,19 +53,20 @@ def process(config, verbose = False):
                 if verbose: timeit('EVALUNIT', False)
             except Exception, e:
                 errors.add((src, name, expr, str(e)))
-                warn("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
+                error("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
         curdate += len(file_objs[0].dimensions['time'])
         output(out, outpath, config)
     if len(errors) > 0:
-        print '******************'
-        print '**** Start Errors:'
-        print '******************'
+        status('******************')
+        status('**** Start Errors:')
+        status('******************')
     for src, name, expr, err in errors:
-        print src, name, expr, err
+        status(' '.join([src, name, expr, err]))
     if len(errors) > 0:
-        print '******************'
-        print '**** End Errors:'
-        print '******************'
+        status('******************')
+        status('**** End Errors:')
+        status('******************')
+
 def output(out, outpath, config):
     """
     """
@@ -76,13 +74,15 @@ def output(out, outpath, config):
     from repair_ae import repair_ae
     from PseudoNetCDF.pncgen import pncgen
     tmp = defaultdict(lambda: 1)
+    tmp['np'] = np
     for k, v in config['unitconversions']['metadefs'].iteritems():
         eval(v, None, tmp)
     for k in tmp.keys():
-        tmp[k] = out.variables[k]
+        if k != 'np':
+            tmp[k] = out.variables[k]
     for k, v in config['unitconversions']['metadefs'].iteritems():
         exec('%s = %s' % (k, v), tmp, out.variables)
-    print 'Vertical profile Low -> High'
+    status('Vertical profile Low -> High')
     np.set_printoptions(precision = 2)
     for vark, varo in out.variables.items():
         if hasattr(varo, 'unitnow'):
@@ -98,9 +98,11 @@ def output(out, outpath, config):
                         warn(vark + ' has negative values', stacklevel = 1)
             del varo.unitnow
         if 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
-            print vark, varo[:, :].mean(0).mean(1)
+            status(vark, varo[:, :].mean(0).mean(1))
     np.set_printoptions(precision = None)
-    
+    out.geos2cmaq_warnings = myioo.getwarnings()
+    out.geos2cmaq_errors = myioo.geterrors()
+    out.geos2cmaq_status = myioo.getstatus()
     f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
     f.sync()
     f.close()
@@ -129,8 +131,9 @@ def evalandunit(out, di, name, expr, variables, verbose = False):
         raise KeyError('No sigma-mid or layer in %s' % str(variables.keys()))
     
     x = defaultdict(lambda: 1)
+    x['np'] = np
     eval(expr, None, x)
-    key = x.keys()[0]
+    key = [k for k in x.keys() if k != 'np'][0]
     metavar = variables[key]
     origunits = metavar.units.strip()
     outvar = out.variables[name]
@@ -192,7 +195,7 @@ def vinterp(val, vert_in, vert_out):
                 try:
                     np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
                 except Exception, e:
-                    warn(str(e))
+                    error(str(e))
             
 
     return outval
@@ -295,11 +298,11 @@ def get_files(config, date, coordstr):
         return last_file_objs
     else:
         if coordstr is not None:
-            print 
-            print '-' * 40
-            print "Getting files for", date
-            print '-' * 40
-            print 
+            status('')
+            status('-' * 40)
+            status("Getting files for " + str(date))
+            status('-' * 40)
+            status('')
         for fi, (r, p) in enumerate(file_paths):
             lp = last_file_paths[fi]
             nf = last_file_objs[fi]
@@ -307,6 +310,7 @@ def get_files(config, date, coordstr):
                 try:
                     nf.close()
                     onf = nf = eval(r)(p)
+                    status('Opening %s with %s' % (p, r), show = False)
                     if coordstr is not None:
                         if isinstance(nf, profile):
                             pnf = nf
