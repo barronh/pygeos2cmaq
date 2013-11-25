@@ -14,8 +14,50 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
     
+def plottes(ax, lon_bnds, lat_bnds, tespaths):
+    from netCDF4 import Dataset
+    allx = []
+    ally = []
+    for path in tespaths:
+        f = Dataset(path)
+        lats = f.variables['latitude']
+        lons = f.variables['longitude']
+        pressure = f.variables['pressure']
+        species = f.variables['species']
+        x = []
+        y = []
+        for lon, lat, pres, spc in zip(lons, lats, pressure, species):
+            inlon = np.logical_and(lon >= lon_bnds[:, 0], lon <= lon_bnds[:, 1])
+            inlat = np.logical_and(lat >= lat_bnds[:, 0], lat <= lat_bnds[:, 1])
+            if np.logical_and(inlon, inlat).any():
+                x.append(pres)
+                y.append(spc)
+        if len(x) > 0:            
+            print '******** FOUND ******', path
+        else:
+            warn('No data found for %s' % path)
+        allx.extend(x)
+        ally.extend(y)
+    x = allx
+    y = ally
+    var = np.ma.masked_values(y, -999.) * 1e9
+    vertcrd = np.ma.masked_values(x, -999.).mean(0)
+    minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
+    meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
+    maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
+    tesline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'r', label = r'tes', zorder = 3)
 
-def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False):
+    x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
+    y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
+    mask = x.mask | y.mask
+    x = np.ma.masked_where(mask, x).compressed()
+    y = np.ma.masked_where(mask, y).compressed()
+    tesrange = ax.fill(x, y, facecolor = 'r', edgecolor = 'r', alpha = .7, zorder = 1, ls = 'solid', label = 'tes min/max')
+    print x.min(), y.min()
+    print x.max(), y.max()
+
+    print tespaths
+def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = []):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
@@ -92,6 +134,8 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             title = '%s: %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
         except:
             title = var_name
+        if len(tespaths) > 0:
+            plottes(ax, f.variables['longitude_bounds'], f.variables['latitude_bounds'], tespaths)
         fig.suptitle(title)
         fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'profile'))
         pl.close(fig)
@@ -128,6 +172,9 @@ if __name__ == '__main__':
     parser.add_option("", "--out-unit", dest = "outunit", type = "string", default = 'ppb',
                         help = "Defaults ppb.")
 
+    parser.add_option("", "--tes-paths", dest = "tespaths", type = "string", default = [], action = "append",
+                        help = "Plot tes on top of boundary from paths; defaults to []")
+
     parser.add_option("-f", "--time-func", dest = "timefunc", default = "mean",
                         help = "Use time-func to reduce the time dimension (mean, min, max, std, var, ndarray.__iter__, etc.")
 
@@ -140,4 +187,4 @@ if __name__ == '__main__':
         options.prefix = args[0]
     if len(options.variables) == 0:
         options.variables = ['O3']
-    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit)
+    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = reduce(list.__add__, [tp.split(',') for tp in options.tespaths]))

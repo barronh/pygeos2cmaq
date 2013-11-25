@@ -213,6 +213,14 @@ def make_out(config, dates):
     out.createDimension('PERIM', len(metf.dimensions['PERIM']))
     out.createDimension('DATE-TIME', len(metf.dimensions['DATE-TIME']))
     out.createDimension('VAR', len(config['mappings']))
+    out.createDimension('nv', len(metf.dimensions['nv']))
+    
+    mlatb = metf.variables['latitude_bounds']
+    latb = out.createVariable('latitude_bounds', 'f', ('PERIM', 'nv'), units = mlatb.units, values = mlatb[:])
+
+    mlonb = metf.variables['longitude_bounds']
+    lonb = out.createVariable('longitude_bounds', 'f', ('PERIM', 'nv'), units = mlonb.units, values = mlonb[:])
+
     mlat = metf.variables['latitude']
     lat = out.createVariable('latitude', 'f', ('PERIM',), units = mlat.units, values = mlat[:])
 
@@ -332,7 +340,7 @@ def get_files(config, date, coordstr):
                     else:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
-                            nf = getvarpnc(onf, 'time TFLAG latitude longitude'.split())
+                            nf = getvarpnc(onf, 'time TFLAG latitude longitude latitude_bounds longitude_bounds'.split())
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
