@@ -54,16 +54,30 @@ def domainfromcmaq(f):
     return cmaqmap
 
 
-
-def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale = 'deciles', minmax = (None, None), minmaxq = (0, 100)):
+def pres_from_sigma(sigma, pref, ptop, avg = False):
+    pres = sigma * (pref - ptop) + ptop
+    if avg:
+        pres = pres[:-1] + np.diff(pres) / 2.
+    return pres
+    
+def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale = 'deciles', minmax = (None, None), minmaxq = (0, 100), sigma = False):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
     f = MFDataset(paths)
-    press = f.VGLVLS * (101325. - f.VGTOP) + f.VGTOP
-    logp = np.log(press)
-    VERTCRD = f.VGLVLS
-    reversevert = not (np.diff(VERTCRD) > 0).all()
+    try:
+        if sigma:
+            vertcrd = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
+        else:
+            vertcrd = pres_from_sigma(f.VGLVLS, pref = 101325., ptop = f.VGTOP, avg = True) / 100.
+    except:
+        lay = f.variables['layer_edges'][:]
+        if not sigma:
+            vertcrd = lay[:-1] + np.diff(lay) / 2.
+        else:
+            vertcrd = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
+            vertcrd = vertcrd[:-1] + np.diff(vertcrd) / 2
+    reversevert = not (np.diff(vertcrd) > 0).all()
     for var_name in keys:
         var = eval(var_name, None, f.variables)[:]
         if func == 'each':
@@ -105,9 +119,15 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 for ax in [axmap, axn]:
                     ax.xaxis.set_major_formatter(NullFormatter())
                 for ax in [axn, axs]:
-                    ax.set_ylabel('sigma')
+                    if sigma:
+                        ax.set_ylabel('sigma')
+                    else:
+                        ax.set_ylabel('pressure')
                 for ax in [axe, axw]:
-                    ax.set_xlabel('sigma')
+                    if sigma:
+                        ax.set_xlabel('sigma')
+                    else:
+                        ax.set_xlabel('pressure')
                 xyfactor = 1
             else:
                 fig = pl.figure(figsize = (16, 4))
@@ -118,19 +138,19 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 cax = fig.add_axes([.91, .1, .025, .8])
                 axw.set_ylabel('sigma')
             
-                xyfactor = 1e-3
+                xyfactor = 1e-3 # m -> km
                      
             x = f.NCOLS + 1
             y = f.NROWS + 1
-            X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, VERTCRD)
+            X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, vertcrd)
             patchess = axs.pcolor(X, Y, var[:, :x-1], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             if not map:
                 if reversevert: axs.set_ylim(*axs.get_ylim()[::-1])
-                if reversevert: axs.set_xlim(*axs.get_xlim()[::-1])
                 axs.set_title('South')
                 axs.set_xlabel('E to W km')
-        
-            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, VERTCRD)
+                axs.set_xlim(*axs.get_xlim()[::-1])
+                
+            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, vertcrd)
             patchesn = axn.pcolor(X, Y, var[:, x+y:x+y+x], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             if reversevert: axn.set_ylim(*axn.get_ylim()[::-1])
             if not map:
@@ -138,25 +158,34 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 axn.set_xlabel('W to E km')
 
             if map:
-                X, Y = np.meshgrid(VERTCRD, np.arange(y) * f.YCELL)
+                X, Y = np.meshgrid(vertcrd, np.arange(y) * f.YCELL)
                 patchese = axe.pcolor(X, Y, var[:, x:x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axe.set_xlim(*axe.get_xlim()[::-1])
             else:
-                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, VERTCRD)
+                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, vertcrd)
                 patchese = axe.pcolor(X, Y, var[:, x:x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axe.set_ylim(*axe.get_ylim()[::-1])
                 axe.set_title('East')
                 axe.set_xlabel('N to S km')
                 axe.set_xlim(*axe.get_xlim()[::-1])
             if map:
-                X, Y = np.meshgrid(VERTCRD, np.arange(y) * f.YCELL)
+                X, Y = np.meshgrid(vertcrd, np.arange(y) * f.YCELL)
                 patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             else:
-                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, VERTCRD)
+                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, vertcrd)
                 patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axw.set_ylim(*axw.get_ylim()[::-1])
                 axw.set_title('West')
                 axw.set_xlabel('S to N km')
+            if map:
+                for ax in [axe, axw]:
+                    ax.axis('tight', axis = 'x')
+                    pl.setp( ax.xaxis.get_majorticklabels(), rotation=90 )
+                for ax in [axs, axn]:
+                    ax.axis('tight', axis = 'y')
+            else:
+                for ax in [axe, axn, axw, axs] + ([axmap] if map else []):
+                    ax.axis('tight')
 
             fig.colorbar(patchesw, cax = cax, boundaries = bins)
             fig.savefig('%s_%s_%s.png' % (prefix, var_name, func))
@@ -180,6 +209,9 @@ if __name__ == '__main__':
     parser.add_option("-n", "--no-map", dest = "nomap", action = "store_true", default = False,
                         help = "Try to plot with map")
 
+    parser.add_option("", "--sigma", dest = "sigma", action = "store_true", default = False,
+                        help = "Plot data on sigma coordinate.")
+
     parser.add_option("-s", "--scale", dest = "scale", type = "string", default = 'deciles',
                         help = "Defaults to deciles (i.e., 10 equal probability bins), but linear and log are also options.")
 
@@ -201,4 +233,4 @@ if __name__ == '__main__':
         options.prefix = args[0]
     if len(options.variables) == 0:
         options.variables = ['O3']
-    plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), map = not options.nomap, prefix = options.prefix, func = options.timefunc, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq))
+    plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), map = not options.nomap, prefix = options.prefix, func = options.timefunc, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = False)
