@@ -3,6 +3,7 @@ import pylab as pl
 import numpy as np
 from warnings import warn
 from netCDF4 import MFDataset
+from datetime import datetime, timedelta
 
 
 def aqmeiidomain():
@@ -60,7 +61,7 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
     
-def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale = 'deciles', minmax = (None, None), minmaxq = (0, 100), sigma = False):
+def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale = 'deciles', minmax = (None, None), minmaxq = (0, 100), sigma = False, maskzeros = False):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
@@ -86,6 +87,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
             vars = [(func, getattr(np, func)(var, axis = 0))]
         for func, var in vars:
             bmap = None
+            if maskzeros: var = np.ma.masked_values(var, 0)
             vmin, vmax = np.percentile(np.ma.compressed(var).ravel(), list(minmaxq))
             if minmax[0] is not None:
                 vmin = minmax[0]
@@ -107,6 +109,8 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                     cmaqmap.drawcoastlines()
                     cmaqmap.drawcountries()
                     cmaqmap.drawstates()
+                    cmaqmap.drawparallels(np.arange(-90, 100, 10), labels = [True, True, False, False])
+                    cmaqmap.drawmeridians(np.arange(-180, 190, 20), labels = [False, False, True, True])
                 except Exception, e:
                     warn('An error occurred and no map will be shown:\n%s' % str(e))
                 axn = fig.add_subplot(3,3,2, sharex = axmap)
@@ -187,21 +191,27 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 for ax in [axe, axn, axw, axs] + ([axmap] if map else []):
                     ax.axis('tight')
 
+            try:
+                sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
+                edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
+            except:
+                sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
+                edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+            try:
+                title = '%s %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
+            except:
+                title = var_name
+            fig.suptitle(title)
             fig.colorbar(patchesw, cax = cax, boundaries = bins)
             fig.savefig('%s_%s_%s.png' % (prefix, var_name, func))
             pl.close(fig)
     
 if __name__ == '__main__':
     from optparse import OptionParser
-    parser = OptionParser()
-    parser.set_usage("""Usage: python -m geos2cmaq.plot [-v VAR1,VAR2] [-p prefix] ifile
-
-    ifile - path to a file formatted as type -f
-    
-    """)
+    parser = OptionParser("Usage: %prog [options] ifile\n\n\tifile - netcdf input file with variables; time dimension must be first, and layer dimension must be second")
 
     parser.add_option("-v", "--variables", dest = "variables", action = "append", default = [],
-                        help = "Variable names separated by ','")
+                        help = "Variable name or expression; multiple names can be provided by specifying -v multiple times")
 
     parser.add_option("-p", "--prefix", dest = "prefix", type = "string", default = None,
                         help = "Prefix for figures")
@@ -214,6 +224,9 @@ if __name__ == '__main__':
 
     parser.add_option("-s", "--scale", dest = "scale", type = "string", default = 'deciles',
                         help = "Defaults to deciles (i.e., 10 equal probability bins), but linear and log are also options.")
+
+    parser.add_option("", "--mask-zeros", dest = "maskzeros", action = "store_true", default = False,
+                        help = "Defaults False.")
 
     parser.add_option("", "--minmax", dest = "minmax", type = "string", default = "None,None",
                         help = "Defaults None, None.")
@@ -233,4 +246,4 @@ if __name__ == '__main__':
         options.prefix = args[0]
     if len(options.variables) == 0:
         options.variables = ['O3']
-    plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), map = not options.nomap, prefix = options.prefix, func = options.timefunc, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = False)
+    plot(args, keys = options.variables, map = not options.nomap, prefix = options.prefix, func = options.timefunc, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros)

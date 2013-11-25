@@ -4,6 +4,7 @@ import numpy as np
 from warnings import warn
 from netCDF4 import MFDataset
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 unitconvert = {('ppmV', 'ppb'): lambda x: x * 1000.}
 
@@ -14,7 +15,7 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
     return pres
     
 
-def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False):
+def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
@@ -46,7 +47,7 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
         except:
             temp[var_name]
             var = f.variables[var_name][:]
-        
+        if maskzeros: var = np.ma.masked_values(var, 0)
         unit = f.variables[temp.keys()[0]].units.strip()
         var = unitconvert.get((unit, outunit), lambda x: x)(var)
         bmap = None
@@ -76,25 +77,33 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             ax.set_ylabel('sigma')
         else:
             ax.set_ylabel('pressure')
-        ax.set_xlabel('%s %s' % (var_name, unit))
+        ax.set_xlabel('%s %s' % (var_name, outunit))
         #if scale == 'log':
         #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
+        try:
+            sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
+            edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
+            
+        except Exception, e:
+            print str(e)
+            sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
+            edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+        try:
+            title = '%s: %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
+        except:
+            title = var_name
+        fig.suptitle(title)
         fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'profile'))
         pl.close(fig)
     return fig
     
 if __name__ == '__main__':
     from optparse import OptionParser
-    parser = OptionParser()
-    parser.set_usage("""Usage: python -m geos2cmaq.plot [-v VAR1,VAR2] [-p prefix] ifile
-
-    ifile - path to a file formatted as type -f
-    
-    """)
+    parser = OptionParser("Usage: %prog [options] ifile\n\n\tifile - netcdf input file with variables; layer dimension must be second")
 
     parser.add_option("-v", "--variables", dest = "variables", action = "append", default = [],
-                        help = "Variable names separated by ','")
-
+                        help = "Variable name or expression; multiple names can be provided by specifying -v multiple times")
+    
     parser.add_option("-p", "--prefix", dest = "prefix", type = "string", default = None,
                         help = "Prefix for figures")
 
@@ -110,8 +119,14 @@ if __name__ == '__main__':
     parser.add_option("", "--minmax", dest = "minmax", type = "string", default = "None,None",
                         help = "Defaults None, None.")
 
+    parser.add_option("", "--mask-zeros", dest = "maskzeros", action = "store_true", default = False,
+                        help = "Defaults False.")
+
     parser.add_option("", "--minmaxq", dest = "minmaxq", type = "string", default = '0,100',
                         help = "Defaults 0,100.")
+
+    parser.add_option("", "--out-unit", dest = "outunit", type = "string", default = 'ppb',
+                        help = "Defaults ppb.")
 
     parser.add_option("-f", "--time-func", dest = "timefunc", default = "mean",
                         help = "Use time-func to reduce the time dimension (mean, min, max, std, var, ndarray.__iter__, etc.")
@@ -125,4 +140,4 @@ if __name__ == '__main__':
         options.prefix = args[0]
     if len(options.variables) == 0:
         options.variables = ['O3']
-    fig = plot(args, keys = reduce(list.__add__, [v.split(',') for v in options.variables]), prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma)
+    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit)
