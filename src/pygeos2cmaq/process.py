@@ -91,7 +91,7 @@ def output(out, outpath, config):
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
                 if (varo[:, :] < 0).any():
-                    if config['zero-negs']:
+                    if config['zero_negs']:
                         varo[np.where(varo[:] < 0)] = 0.
                         warn(vark + ' negative values were set to zero', stacklevel = 1)
                     else:
