@@ -4,3 +4,5 @@ src/pygeos2cmaq/mapping/*.bkp
 src/pygeos2cmaq/*.nc
 src/pygeos2cmaq/*.yaml
 build/*
+*.png
+*.log
