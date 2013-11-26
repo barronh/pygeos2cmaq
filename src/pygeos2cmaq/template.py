@@ -68,10 +68,12 @@ def template(config = 'mapping/cb05cl_ae6_aq.csv'):
     and adding them to a template string
     """
     import numpy as np
-    
+    import csv
     # Get mappings from CSV file
-    mappings = np.recfromtxt(config, delimiter = ',', names = True, comments = '+|$')
+    mappings = csv.reader(file(config,'r'))
     
+    # Skip headings
+    mappings.next()
     # Initialize lines list
     lines = []
     
