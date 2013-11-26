@@ -13,51 +13,53 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
     if avg:
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
-    
+
 def plottes(ax, lon_bnds, lat_bnds, tespaths):
     from netCDF4 import Dataset
+    from glob import glob
     allx = []
     ally = []
+    lon_bnds = lon_bnds[:]
+    lat_bnds = lat_bnds[:]
+    tespaths = reduce(list.__add__, [glob(i) for i in tespaths])
     for path in tespaths:
         f = Dataset(path)
-        lats = f.variables['latitude']
-        lons = f.variables['longitude']
+        lats = f.variables['latitude'][:][:, None]
+        lons = f.variables['longitude'][:][:, None]
         pressure = f.variables['pressure']
         species = f.variables['species']
         x = []
         y = []
-        for lon, lat, pres, spc in zip(lons, lats, pressure, species):
-            inlon = np.logical_and(lon >= lon_bnds[:, 0], lon <= lon_bnds[:, 1])
-            inlat = np.logical_and(lat >= lat_bnds[:, 0], lat <= lat_bnds[:, 1])
-            if np.logical_and(inlon, inlat).any():
-                x.append(pres)
-                y.append(spc)
-        if len(x) > 0:            
+        inlon = np.logical_and(lons >= lon_bnds[None, :, 0], lons <= lon_bnds[None, :, 1])
+        inlat = np.logical_and(lats >= lat_bnds[None, :, 0], lats <= lat_bnds[None, :, 1])
+        inboth = np.logical_and(inlon, inlat).any(1)
+        if inboth.sum(0) > 0:            
             print '******** FOUND ******', path
+            x = pressure[inboth]
+            y = species[inboth]
+            allx.append(x)
+            ally.append(y)
         else:
             warn('No data found for %s' % path)
-        allx.extend(x)
-        ally.extend(y)
-    x = allx
-    y = ally
-    var = np.ma.masked_values(y, -999.) * 1e9
-    vertcrd = np.ma.masked_values(x, -999.).mean(0)
+    
+    if len(allx) == 0:
+        return            
+    var = np.ma.masked_values(ally, -999.) * 1e9
+    var = var.reshape(-1, var.shape[-1])
+    vertcrd = np.ma.masked_values(allx, -999.).mean(0).mean(0)
     minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
     meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
     maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
-    tesline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'r', label = r'tes', zorder = 3)
+    tesline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'r', label = r'TES', zorder = 3)
 
     x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
     y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
     mask = x.mask | y.mask
     x = np.ma.masked_where(mask, x).compressed()
     y = np.ma.masked_where(mask, y).compressed()
-    tesrange = ax.fill(x, y, facecolor = 'r', edgecolor = 'r', alpha = .7, zorder = 1, ls = 'solid', label = 'tes min/max')
-    print x.min(), y.min()
-    print x.max(), y.max()
+    tesrange = ax.fill(x, y, facecolor = 'r', edgecolor = 'r', alpha = .7, zorder = 1, ls = 'solid', label = 'TES min/max')
 
-    print tespaths
-def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = []):
+def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = [], edges = True):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
@@ -81,6 +83,8 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     geosrangeecolor = 'k'
     geosrangels = 'solid'
     alpha = .7
+    lonb = f.variables['longitude_bounds']
+    latb = f.variables['latitude_bounds']
     for var_name in keys:
         temp = defaultdict(lambda: 1)
         try:
@@ -98,49 +102,99 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             vmin = minmax[0]
         if minmax[1] is not None:
             vmax = minmax[1]
-        fig = pl.figure(figsize = (12, 4))
-        ax = fig.add_axes([.1, .15, .8, .75])
-        minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
-        meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
-        maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
-        modline = ax.plot(meanval, vertcrd, ls = geosls, lw = 2, color = geoscolor, label = r'GC $\mathbf{\hat{y}}^{i,m}_t$', zorder = 4)
-
-        x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
-        y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
-        mask = x.mask | y.mask
-        x = np.ma.masked_where(mask, x).compressed()
-        y = np.ma.masked_where(mask, y).compressed()
-        modrange = ax.fill(x, y, facecolor = geosrangecolor, edgecolor = geosrangeecolor, alpha = alpha, zorder = 1, ls = geosrangels, label = 'GC min/max')
-        ymin, ymax = vertcrd.min(), vertcrd.max()
-        ax.set_ylim(ymax, ymin)
-        ax.set_xscale(scale)
-        ax.set_xlim(vmin, vmax)
-        if sigma:
-            ax.set_ylabel('sigma')
-        else:
-            ax.set_ylabel('pressure')
-        ax.set_xlabel('%s %s' % (var_name, outunit))
-        #if scale == 'log':
-        #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
-        try:
-            sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
-            edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
+        if edges:
+            fig = pl.figure(figsize = (16, 4))
+            offset = 0.05
+            ax = fig.add_axes([.1 - offset, .15, .225, .725])
+            ax = fig.add_axes([.325 - offset, .15, .225, .725])
+            ax = fig.add_axes([.55 - offset, .15, .225, .725])
+            ax = fig.add_axes([.775 - offset, .15, .225, .725])
+            ss = 0
+            se = ss + f.NCOLS + 1
+            es = se
+            ee = se + f.NROWS + 1
+            ns = ee
+            ne = ee + f.NCOLS + 1
+            ws = ne
+            we = ws + f.NROWS + 1
+            axs = fig.axes
+            for ax in fig.axes[1:]:
+                ax.yaxis.set_major_formatter(pl.NullFormatter())
             
-        except Exception, e:
-            print str(e)
-            sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
-            edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+            vars = [var[:, :, ss:se], var[:, :, es:ee], var[:, :, ns:ne][:, :, ::-1], var[:, :, ws:we][:, :, ::-1]]
+            lonbss = [lonb[ss:se], lonb[es:ee], lonb[ns:ne][::-1], lonb[ws:we][::-1]]
+            latbss = [latb[ss:se], latb[es:ee], latb[ns:ne][::-1], latb[ws:we][::-1]]
+            
+        else:
+            fig = pl.figure(figsize = (8, 4))
+            ax = fig.add_axes([.1, .15, .8, .725])
+            axs = fig.axes
+            vars = [var]
+            lonbss = [lonb[:]]
+            latbss = [latb[:]]
+        for ax, var, lonbs, latbs in zip(axs, vars, lonbss, latbss):
+            minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
+            meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
+            maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
+            modline = ax.plot(meanval, vertcrd, ls = geosls, lw = 2, color = geoscolor, label = r'GC', zorder = 4)
+
+            x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
+            y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
+            mask = x.mask | y.mask
+            x = np.ma.masked_where(mask, x).compressed()
+            y = np.ma.masked_where(mask, y).compressed()
+            modrange = ax.fill(x, y, facecolor = geosrangecolor, edgecolor = geosrangeecolor, alpha = alpha, zorder = 1, ls = geosrangels, label = 'GC min/max')
+            ymin, ymax = vertcrd.min(), vertcrd.max()
+            ax.set_ylim(ymax, ymin)
+            ax.set_xscale(scale)
+            ax.set_xlim(vmin, vmax)
+            #if scale == 'log':
+            #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
+            try:
+                sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
+                edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
+            
+            except Exception, e:
+                print str(e)
+                sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
+                edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+            if len(tespaths) > 0:
+                plottes(ax, lonbs, latbs, tespaths)
+
         try:
-            title = '%s: %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
+            title = '%s to %s' % (sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
         except:
             title = var_name
-        if len(tespaths) > 0:
-            plottes(ax, f.variables['longitude_bounds'], f.variables['latitude_bounds'], tespaths)
-        fig.suptitle(title)
+        if sigma:
+            axs[0].set_ylabel('sigma')
+        else:
+            axs[0].set_ylabel('pressure')
+
+        xmax = -np.inf
+        xmin = np.inf
+        for ax in fig.axes:
+            tmp_xmin, tmp_xmax = ax.get_xlim()
+            xmax = max(tmp_xmax, xmax)
+            xmin = min(tmp_xmin, xmin)
+        for ax in fig.axes:
+            ax.set_xlim(xmin, xmax)
+            
+        if len(axs) == 1:
+            axs[0].set_xlabel('%s %s' % (var_name, outunit))
+        else:
+            axs[0].set_xlabel('South')
+            axs[1].set_xlabel('East')
+            axs[2].set_xlabel('North')
+            axs[3].set_xlabel('West')
+        pl.legend(bbox_to_anchor = (.5, 1), loc = 'upper center', bbox_transform = fig.transFigure, ncol = 4)
+        if edges:
+            fig.text(0.95, 0.975, title, horizontalalignment = 'right', verticalalignment = "top", fontsize = 16)
+        else:
+            fig.text(0.95, 0.025, title, horizontalalignment = 'right', verticalalignment = "bottom", fontsize = 16)
         fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'profile'))
         pl.close(fig)
     return fig
-    
+
 if __name__ == '__main__':
     from optparse import OptionParser
     parser = OptionParser("Usage: %prog [options] ifile\n\n\tifile - netcdf input file with variables; layer dimension must be second")
@@ -177,6 +231,9 @@ if __name__ == '__main__':
 
     parser.add_option("-f", "--time-func", dest = "timefunc", default = "mean",
                         help = "Use time-func to reduce the time dimension (mean, min, max, std, var, ndarray.__iter__, etc.")
+                        
+    parser.add_option("-e", "--edges", dest = "edges", default = False, action = "store_true",
+                        help = "Plot S,E,N,W")
 
     (options, args) = parser.parse_args()
     
@@ -187,4 +244,6 @@ if __name__ == '__main__':
         options.prefix = args[0]
     if len(options.variables) == 0:
         options.variables = ['O3']
-    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = reduce(list.__add__, [tp.split(',') for tp in options.tespaths]))
+    if len(options.tespaths) > 0:
+        options.tespaths = reduce(list.__add__, [tp.split(',') for tp in options.tespaths])
+    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = options.tespaths, edges = options.edges)
