@@ -204,9 +204,11 @@ def make_out(config, dates):
     """
     Return a file to fill with data
     """
+    from PseudoNetCDF.sci_var import extract
     out = PseudoNetCDFFile()
     file_objs = get_files(config, dates[0], None)
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
+    geosf = [f for f in file_objs if 'tau0' in f.variables.keys()][0]
     d = out.createDimension('TSTEP', len(dates))
     d.setunlimited(True)
     out.createDimension('LAY', len(metf.dimensions['LAY']))
@@ -216,16 +218,30 @@ def make_out(config, dates):
     out.createDimension('nv', len(metf.dimensions['nv']))
     
     mlatb = metf.variables['latitude_bounds']
-    latb = out.createVariable('latitude_bounds', 'f', ('PERIM', 'nv'), units = mlatb.units, values = mlatb[:])
+    out.createVariable('latitude_bounds', 'f', ('PERIM', 'nv'), units = mlatb.units, values = mlatb[:])
 
     mlonb = metf.variables['longitude_bounds']
-    lonb = out.createVariable('longitude_bounds', 'f', ('PERIM', 'nv'), units = mlonb.units, values = mlonb[:])
+    out.createVariable('longitude_bounds', 'f', ('PERIM', 'nv'), units = mlonb.units, values = mlonb[:])
 
     mlat = metf.variables['latitude']
-    lat = out.createVariable('latitude', 'f', ('PERIM',), units = mlat.units, values = mlat[:])
+    out.createVariable('latitude', 'f', ('PERIM',), units = mlat.units, values = mlat[:])
 
     mlon = metf.variables['longitude']
-    lon = out.createVariable('longitude', 'f', ('PERIM',), units = mlon.units, values = mlon[:])
+    out.createVariable('longitude', 'f', ('PERIM',), units = mlon.units, values = mlon[:])
+    coordstr = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon, mlat)])
+    
+    geosf = extract(geosf, [coordstr])
+    glatb = geosf.variables['latitude_bounds']
+    out.createVariable('geos_latitude_bounds', 'f', ('PERIM', 'nv'), units = glatb.units, values = glatb[:])
+
+    glonb = geosf.variables['longitude_bounds']
+    out.createVariable('geos_longitude_bounds', 'f', ('PERIM', 'nv'), units = glonb.units, values = glonb[:])
+
+    glat = geosf.variables['latitude']
+    out.createVariable('geos_latitude', 'f', ('PERIM',), units = glat.units, values = glat[:])
+
+    glon = geosf.variables['longitude']
+    out.createVariable('geos_longitude', 'f', ('PERIM',), units = glon.units, values = glon[:])
 
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
     for pk in metf.ncattrs():
@@ -244,7 +260,7 @@ def make_out(config, dates):
         var.long_name = name.ljust(16);
         var.var_desc = name.ljust(80);
         var.units = outunit.ljust(16)
-    out.lonlatcoords = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon, mlat)])
+    out.lonlatcoords = coordstr
     return out
 
 def get_group(file_objs, src, dates):
@@ -340,7 +356,7 @@ def get_files(config, date, coordstr):
                     else:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
-                            nf = getvarpnc(onf, 'time TFLAG latitude longitude latitude_bounds longitude_bounds'.split())
+                            nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split())
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
