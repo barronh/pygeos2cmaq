@@ -1,7 +1,7 @@
 import numpy as np
 
 def get_interp_w(x, xn):
-    dx = np.diff(x)
+    dx = np.ma.diff(x)
     if (dx > 0).all():
         reverse = False
     elif (dx < 0).all():
@@ -11,12 +11,12 @@ def get_interp_w(x, xn):
     if reverse:
         x = x[::-1]
         xn = xn[::-1]    
-    
-    dx = np.append(np.diff(x), xn.max() - x.max())
+    dx = np.ma.diff(x)
+    dx = np.ma.concatenate([dx, [max(xn.max(), x.max() + dx[-1])]])
         
     pct_dx = (xn[:, None] - x[None, :]) / dx[None, :]
-    test = np.logical_and(pct_dx < 1, pct_dx >= 0)
-    #test[:, 1:] = np.logical_or(test[:, 1:], test[:, :-1])
+    test = np.ma.logical_and(pct_dx < 1, pct_dx >= 0)
+    #test[:, 1:] = np.ma.logical_or(test[:, 1:], test[:, :-1])
     mask = False == test
     w = np.ma.masked_where(mask, pct_dx)
     w = 1 - w
@@ -25,7 +25,7 @@ def get_interp_w(x, xn):
     omax = x[-1]
     if nmax > omax:
         # Needs special case extrapolation code
-        for i in np.where(xn >= x.max())[0]:
+        for i in np.ma.where(xn >= x.max())[0]:
             w[i, -1] = pct_dx[i, -2]
             w[i, -2] = 1 - w[i, -1]
         
@@ -34,11 +34,16 @@ def get_interp_w(x, xn):
     omin = x[0]
     if nmin < omin:
         # Needs special case extrapolation code
-        for i in np.where(xn <= x.min())[0]:
+        for i in np.ma.where(xn <= x.min())[0]:
             w[i, 0] = pct_dx[i, 0]
             w[i, 1] = 1 - w[i, 0]
     w = w.filled(0)
-    np.testing.assert_allclose(w.sum(1), 1)
+    try:
+        np.testing.assert_allclose(w.sum(1), 1, rtol=1e-6)
+    except:
+        print w.sum(1); print w
+        raise
+        
     if reverse:
         w = w[::-1, ::-1]
     return w
