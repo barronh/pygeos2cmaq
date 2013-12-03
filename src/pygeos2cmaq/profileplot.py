@@ -5,7 +5,8 @@ from warnings import warn
 from netCDF4 import MFDataset
 from collections import defaultdict
 from datetime import datetime, timedelta
-
+from glob import glob
+from fast_interp import get_interp_w
 unitconvert = {('ppmV', 'ppb'): lambda x: x * 1000.}
 
 def pres_from_sigma(sigma, pref, ptop, avg = False):
@@ -14,13 +15,90 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
 
-def plottes(ax, lon_bnds, lat_bnds, tespaths):
-    from netCDF4 import Dataset
-    from glob import glob
+def maskfilled(v):
+    return np.ma.masked_values(v[:], v.attrs['_FillValue'])
+
+def plot_omi(ax, lon_bnds, lat_bnds, omipaths, key = 'O3Profile', airden = None, airdenvert = None):
+    import h5py
+    from scipy.constants import Avogadro
     allx = []
     ally = []
     lon_bnds = lon_bnds[:]
     lat_bnds = lat_bnds[:]
+    if len(omipaths) == 0:
+        return
+    
+    omipaths = reduce(list.__add__, [glob(i) for i in omipaths])
+    for path in omipaths:
+        print path
+        f = h5py.File(path, mode = 'r')
+        swaths = f['HDFEOS']['SWATHS'][key]
+        latsv = swaths['Geolocation Fields']['Latitude']
+        lonsv = swaths['Geolocation Fields']['Longitude']
+        lats = maskfilled(latsv).reshape(-1, 1)
+        lons = maskfilled(lonsv).reshape(-1, 1)
+        inboth = matchspace(lons, lats, lon_bnds, lat_bnds)
+        if inboth.filled(False).sum(0) > 0:            
+            print '******** FOUND ******', path
+            pressurev = swaths['Geolocation Fields']['Pressure']
+            altitudev = swaths['Geolocation Fields']['Altitude']
+            nk = pressurev.shape[-1]
+            speciesv = swaths['Data Fields']['O3']
+            species = maskfilled(speciesv).reshape(-1, nk -1)
+
+            # Pressure is from top to bottom
+            pressure = maskfilled(pressurev).reshape(-1, nk)
+            altitude = maskfilled(altitudev).reshape(-1, nk)
+            dz = (altitude[:, 1:] - altitude[:, :-1]) * 1000. * 100.
+            #Lacis 1990 1 DU = 2.69e16 molecules cm-2
+            species = species / dz * 2.69e16 # [=] molec cm-3
+            midpressure = pressure[:, :-1] + np.diff(pressure, axis = 1) / 2.
+            w = get_interp_w(airdenvert, midpressure.mean(0)[::-1])
+            myairden = (w * airden[None, :]).sum(1)[::-1]
+            species = species / myairden[:] # molec/molec # vmr
+            x = pressure[inboth]
+            y = species[inboth]
+            allx.append(x)
+            ally.append(y)
+        else:
+            warn('No data found for %s' % path)
+    
+    if len(allx) == 0:
+        return            
+    
+    var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
+    import pdb; pdb.set_trace()    
+    var = var.reshape(-1, var.shape[-1])
+    vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0).repeat(2, 0)[1:-1]
+    #vertcrd = vertcrd[:-1] + np.ma.diff(vertcrd) / 2.
+    minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1).repeat(2, 0)
+    meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1).repeat(2, 0)
+    maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1).repeat(2, 0)
+    omiline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'b', label = r'OMI', zorder = 3)
+
+    x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
+    y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
+    mask = x.mask | y.mask
+    x = np.ma.masked_where(mask, x).compressed()
+    y = np.ma.masked_where(mask, y).compressed()
+    omirange = ax.fill(x, y, facecolor = 'b', edgecolor = 'b', alpha = .7, zorder = 1, ls = 'solid', label = 'OMI min/max')
+    ax.text(.05, .7, 'OMI = %d' % var.shape[0], transform = ax.transAxes)
+
+
+def matchspace(lons, lats, lon_bnds, lat_bnds):
+    inlon = np.logical_and(lons >= lon_bnds[None, :, 0], lons <= lon_bnds[None, :, 1])
+    inlat = np.logical_and(lats >= lat_bnds[None, :, 0], lats <= lat_bnds[None, :, 1])
+    inboth = np.logical_and(inlon, inlat).any(1)
+    return inboth
+
+def plot_tes(ax, lon_bnds, lat_bnds, tespaths):
+    from netCDF4 import Dataset
+    allx = []
+    ally = []
+    lon_bnds = lon_bnds[:]
+    lat_bnds = lat_bnds[:]
+    if len(tespaths) == 0:
+        return
     tespaths = reduce(list.__add__, [glob(i) for i in tespaths])
     for path in tespaths:
         f = Dataset(path)
@@ -28,11 +106,7 @@ def plottes(ax, lon_bnds, lat_bnds, tespaths):
         lons = f.variables['longitude'][:][:, None]
         pressure = f.variables['pressure']
         species = f.variables['species']
-        x = []
-        y = []
-        inlon = np.logical_and(lons >= lon_bnds[None, :, 0], lons <= lon_bnds[None, :, 1])
-        inlat = np.logical_and(lats >= lat_bnds[None, :, 0], lats <= lat_bnds[None, :, 1])
-        inboth = np.logical_and(inlon, inlat).any(1)
+        inboth = matchspace(lons, lats, lon_bnds, lat_bnds)
         if inboth.sum(0) > 0:            
             print '******** FOUND ******', path
             x = pressure[inboth]
@@ -44,9 +118,9 @@ def plottes(ax, lon_bnds, lat_bnds, tespaths):
     
     if len(allx) == 0:
         return            
-    var = np.ma.masked_values(ally, -999.) * 1e9
+    var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
     var = var.reshape(-1, var.shape[-1])
-    vertcrd = np.ma.masked_values(allx, -999.).mean(0).mean(0)
+    vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0)
     minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
     meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
     maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
@@ -58,8 +132,9 @@ def plottes(ax, lon_bnds, lat_bnds, tespaths):
     x = np.ma.masked_where(mask, x).compressed()
     y = np.ma.masked_where(mask, y).compressed()
     tesrange = ax.fill(x, y, facecolor = 'r', edgecolor = 'r', alpha = .7, zorder = 1, ls = 'solid', label = 'TES min/max')
+    ax.text(.05, .8, 'TES = %d' % var.shape[0], transform = ax.transAxes)
 
-def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = [], edges = True):
+def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = [], omipaths = [], edges = True):
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
@@ -83,8 +158,12 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     geosrangeecolor = 'k'
     geosrangels = 'solid'
     alpha = .7
-    lonb = f.variables['longitude_bounds']
-    latb = f.variables['latitude_bounds']
+    try:
+        lonb = f.variables['geos_longitude_bounds']
+        latb = f.variables['geos_latitude_bounds']
+    except:
+        lonb = f.variables['longitude_bounds']
+        latb = f.variables['latitude_bounds']
     for var_name in keys:
         temp = defaultdict(lambda: 1)
         try:
@@ -133,9 +212,11 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             lonbss = [lonb[:]]
             latbss = [latb[:]]
         for ax, var, lonbs, latbs in zip(axs, vars, lonbss, latbss):
-            minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
-            meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
-            maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
+            vals = var.swapaxes(0, 1).reshape(var.shape[1], -1)
+            ax.text(.05, .9, 'n = %d' % vals.shape[1], transform = ax.transAxes)
+            minval = vals.min(1)
+            meanval = vals.mean(1)
+            maxval = vals.max(1)
             modline = ax.plot(meanval, vertcrd, ls = geosls, lw = 2, color = geoscolor, label = r'GC', zorder = 4)
 
             x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
@@ -151,15 +232,20 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             #if scale == 'log':
             #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
             try:
-                sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
-                edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
+                SDATE = f.variables['TFLAG'][:][0, 0, 0]
+                EDATE = f.variables['TFLAG'][:][-1, 0, 0]
+                STIME = f.variables['TFLAG'][:][0, 0, 1]
+                ETIME = f.variables['TFLAG'][:][-1, 0, 1]
+                sdate = datetime.strptime('%d %06d' % (SDATE, STIME), '%Y%j %H%M%S')
+                edate = datetime.strptime('%d %06d' % (EDATE, ETIME), '%Y%j %H%M%S')
             
             except Exception, e:
                 print str(e)
                 sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
                 edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
-            if len(tespaths) > 0:
-                plottes(ax, lonbs, latbs, tespaths)
+            plot_tes(ax, lonbs, latbs, tespaths)
+            if len(omipaths) > 0:
+                plot_omi(ax, lonbs, latbs, omipaths, airden = f.variables['AIRDEN'][:].mean(0).mean(1), airdenvert = vertcrd)
 
         try:
             title = '%s to %s' % (sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
@@ -186,12 +272,17 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             axs[1].set_xlabel('East')
             axs[2].set_xlabel('North')
             axs[3].set_xlabel('West')
+        nl = 0
+        for ax in axs:
+            if len(ax.get_lines()) > nl:
+                nl = len(ax.get_lines())
+                pl.sca(ax)
         pl.legend(bbox_to_anchor = (.5, 1), loc = 'upper center', bbox_transform = fig.transFigure, ncol = 4)
         if edges:
             fig.text(0.95, 0.975, title, horizontalalignment = 'right', verticalalignment = "top", fontsize = 16)
         else:
             fig.text(0.95, 0.025, title, horizontalalignment = 'right', verticalalignment = "bottom", fontsize = 16)
-        fig.savefig('%s_%s_%s.png' % (prefix, var_name, 'profile'))
+        fig.savefig('%s_%s_%s.pdf' % (prefix, var_name, 'profile'))
         pl.close(fig)
     return fig
 
@@ -229,6 +320,9 @@ if __name__ == '__main__':
     parser.add_option("", "--tes-paths", dest = "tespaths", type = "string", default = [], action = "append",
                         help = "Plot tes on top of boundary from paths; defaults to []")
 
+    parser.add_option("", "--omi-paths", dest = "omipaths", type = "string", default = [], action = "append",
+                        help = "Plot omi on top of boundary from paths; defaults to []")
+
     parser.add_option("-f", "--time-func", dest = "timefunc", default = "mean",
                         help = "Use time-func to reduce the time dimension (mean, min, max, std, var, ndarray.__iter__, etc.")
                         
@@ -246,4 +340,6 @@ if __name__ == '__main__':
         options.variables = ['O3']
     if len(options.tespaths) > 0:
         options.tespaths = reduce(list.__add__, [tp.split(',') for tp in options.tespaths])
-    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = options.tespaths, edges = options.edges)
+    if len(options.omipaths) > 0:
+        options.omipaths = reduce(list.__add__, [op.split(',') for op in options.omipaths])
+    fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = options.tespaths, omipaths = options.omipaths, edges = options.edges)
