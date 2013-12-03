@@ -49,7 +49,7 @@ def plot_omi(ax, lon_bnds, lat_bnds, omipaths, key = 'O3Profile', airden = None,
             # Pressure is from top to bottom
             pressure = maskfilled(pressurev).reshape(-1, nk)
             altitude = maskfilled(altitudev).reshape(-1, nk)
-            dz = (altitude[:, 1:] - altitude[:, :-1]) * 1000. * 100.
+            dz = -(altitude[:, 1:] - altitude[:, :-1]) * 1000. * 100.
             #Lacis 1990 1 DU = 2.69e16 molecules cm-2
             species = species / dz * 2.69e16 # [=] molec cm-3
             midpressure = pressure[:, :-1] + np.diff(pressure, axis = 1) / 2.
@@ -67,22 +67,11 @@ def plot_omi(ax, lon_bnds, lat_bnds, omipaths, key = 'O3Profile', airden = None,
         return            
     
     var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
-    import pdb; pdb.set_trace()    
     var = var.reshape(-1, var.shape[-1])
-    vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0).repeat(2, 0)[1:-1]
-    #vertcrd = vertcrd[:-1] + np.ma.diff(vertcrd) / 2.
-    minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1).repeat(2, 0)
-    meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1).repeat(2, 0)
-    maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1).repeat(2, 0)
-    omiline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'b', label = r'OMI', zorder = 3)
-
-    x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
-    y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
-    mask = x.mask | y.mask
-    x = np.ma.masked_where(mask, x).compressed()
-    y = np.ma.masked_where(mask, y).compressed()
-    omirange = ax.fill(x, y, facecolor = 'b', edgecolor = 'b', alpha = .7, zorder = 1, ls = 'solid', label = 'OMI min/max')
+    vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0) #.reshape(-1, 2).mean(1)
+    omil, omir = minmaxmean(ax, var.T.repeat(2, 0), vertcrd.repeat(2, 0)[1:-1], ls = '-', lw = 2, color = 'b', facecolor = 'b', edgecolor = 'b', alpha = .2, zorder = 5, label = 'OMI')
     ax.text(.05, .7, 'OMI = %d' % var.shape[0], transform = ax.transAxes)
+    return omil, omir
 
 
 def matchspace(lons, lats, lon_bnds, lat_bnds):
@@ -121,18 +110,30 @@ def plot_tes(ax, lon_bnds, lat_bnds, tespaths):
     var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
     var = var.reshape(-1, var.shape[-1])
     vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0)
-    minval = var.swapaxes(0, 1).reshape(var.shape[1], -1).min(1)
-    meanval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).mean(1)
-    maxval = var[:].swapaxes(0, 1).reshape(var.shape[1], -1).max(1)
-    tesline = ax.plot(meanval, vertcrd, ls = '-', lw = 2, color = 'r', label = r'TES', zorder = 3)
+    tesl, tesr = minmaxmean(ax, var.T, vertcrd, ls = '-', lw = 2, color = 'r', facecolor = 'r', edgecolor = 'r', alpha = .2, zorder = 2, label = 'TES')
+    ax.text(.05, .8, 'TES = %d' % var.shape[0], transform = ax.transAxes)
+    return tesl, tesr
+
+def minmaxmean(ax, vals, vertcrd, **kwds):
+    minval = vals.min(1)
+    meanval = vals.mean(1)
+    maxval = vals.max(1)
+    linekwds = kwds.copy()
+    linekwds['color'] = linekwds.pop('facecolor')
+    linekwds.pop('edgecolor')
+    linekwds.pop('alpha')
+    fillkwds = kwds.copy()
+    fillkwds['ls'] = 'solid'
+    
+    line, = ax.plot(meanval, vertcrd, **linekwds)
 
     x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
     y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
     mask = x.mask | y.mask
     x = np.ma.masked_where(mask, x).compressed()
     y = np.ma.masked_where(mask, y).compressed()
-    tesrange = ax.fill(x, y, facecolor = 'r', edgecolor = 'r', alpha = .7, zorder = 1, ls = 'solid', label = 'TES min/max')
-    ax.text(.05, .8, 'TES = %d' % var.shape[0], transform = ax.transAxes)
+    range, = ax.fill(x, y, **fillkwds)
+    return line, range
 
 def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, None), minmaxq = (0, 100), outunit = 'ppb', sigma = False, maskzeros = False, tespaths = [], omipaths = [], edges = True):
     from pylab import figure, NullFormatter, close, rcParams
@@ -152,12 +153,6 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             vertcrd = (lay[:] - lay[-1]) / (lay[0] - lay[-1])
             vertcrd = vertcrd[:-1] + np.diff(vertcrd) / 2
 
-    geosls = '-'
-    geoscolor = 'k'
-    geosrangecolor = 'k'
-    geosrangeecolor = 'k'
-    geosrangels = 'solid'
-    alpha = .7
     try:
         lonb = f.variables['geos_longitude_bounds']
         latb = f.variables['geos_latitude_bounds']
@@ -184,10 +179,10 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
         if edges:
             fig = pl.figure(figsize = (16, 4))
             offset = 0.05
-            ax = fig.add_axes([.1 - offset, .15, .225, .725])
-            ax = fig.add_axes([.325 - offset, .15, .225, .725])
-            ax = fig.add_axes([.55 - offset, .15, .225, .725])
-            ax = fig.add_axes([.775 - offset, .15, .225, .725])
+            ax = fig.add_axes([.1 - offset, .15, .22, .725])
+            ax = fig.add_axes([.325 - offset, .15, .22, .725])
+            ax = fig.add_axes([.55 - offset, .15, .22, .725])
+            ax = fig.add_axes([.775 - offset, .15, .22, .725])
             ss = 0
             se = ss + f.NCOLS + 1
             es = se
@@ -214,17 +209,8 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
         for ax, var, lonbs, latbs in zip(axs, vars, lonbss, latbss):
             vals = var.swapaxes(0, 1).reshape(var.shape[1], -1)
             ax.text(.05, .9, 'n = %d' % vals.shape[1], transform = ax.transAxes)
-            minval = vals.min(1)
-            meanval = vals.mean(1)
-            maxval = vals.max(1)
-            modline = ax.plot(meanval, vertcrd, ls = geosls, lw = 2, color = geoscolor, label = r'GC', zorder = 4)
-
-            x = np.ma.concatenate([minval[:vertcrd.size], maxval[:vertcrd.size][::-1]])
-            y = np.ma.concatenate([vertcrd[:], vertcrd[::-1]])
-            mask = x.mask | y.mask
-            x = np.ma.masked_where(mask, x).compressed()
-            y = np.ma.masked_where(mask, y).compressed()
-            modrange = ax.fill(x, y, facecolor = geosrangecolor, edgecolor = geosrangeecolor, alpha = alpha, zorder = 1, ls = geosrangels, label = 'GC min/max')
+            modl, modr = minmaxmean(ax, vals, vertcrd, facecolor = 'k', edgecolor = 'k', alpha = .2, zorder = 4, label = 'GC', ls = '-', lw = 2, color = 'k')
+            llines = [(modl, modr)]
             ymin, ymax = vertcrd.min(), vertcrd.max()
             ax.set_ylim(ymax, ymin)
             ax.set_xscale(scale)
@@ -243,9 +229,12 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
                 print str(e)
                 sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
                 edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
-            plot_tes(ax, lonbs, latbs, tespaths)
+            if len(tespaths) > 0:
+                tesl, tesr = plot_tes(ax, lonbs, latbs, tespaths)
+                llines.append((tesl, tesr))
             if len(omipaths) > 0:
-                plot_omi(ax, lonbs, latbs, omipaths, airden = f.variables['AIRDEN'][:].mean(0).mean(1), airdenvert = vertcrd)
+                omil, omir = plot_omi(ax, lonbs, latbs, omipaths, airden = f.variables['AIRDEN'][:].mean(0).mean(1), airdenvert = vertcrd)
+                llines.append((omil, omir))
 
         try:
             title = '%s to %s' % (sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
@@ -255,7 +244,7 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             axs[0].set_ylabel('sigma')
         else:
             axs[0].set_ylabel('pressure')
-
+            
         xmax = -np.inf
         xmin = np.inf
         for ax in fig.axes:
@@ -277,7 +266,9 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             if len(ax.get_lines()) > nl:
                 nl = len(ax.get_lines())
                 pl.sca(ax)
-        pl.legend(bbox_to_anchor = (.5, 1), loc = 'upper center', bbox_transform = fig.transFigure, ncol = 4)
+        
+        llabels = [l[0].get_label() for l in llines]
+        pl.legend(llines, llabels, bbox_to_anchor = (.1, 1), loc = 'upper left', bbox_transform = fig.transFigure, ncol = 6)
         if edges:
             fig.text(0.95, 0.975, title, horizontalalignment = 'right', verticalalignment = "top", fontsize = 16)
         else:
