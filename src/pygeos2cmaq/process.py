@@ -1,9 +1,11 @@
 import warnings
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
+from string import uppercase
+from datetime import datetime, timedelta
+
 import numpy as np
 from numpy import *
 from readers import *
-from datetime import datetime, timedelta
 from fast_interp import get_interp_w
 from PseudoNetCDF import PseudoNetCDFFile
 
@@ -103,7 +105,17 @@ def output(out, outpath, config):
     out.geos2cmaq_warnings = myioo.getwarnings()
     out.geos2cmaq_errors = myioo.geterrors()
     out.geos2cmaq_status = myioo.getstatus()
+    varnames = [k.ljust(16) for k in out.variables.keys() if k[:1] in uppercase and k != 'TFLAG']
+    out.createDimension('VAR', len(varnames))
+    tflag = out.variables['TFLAG']
+    var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
+    var.long_name = 'TFLAG'.ljust(16);
+    var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
+    var.units = "<YYYYDDD,HHMMSS>"
+    var[:, :, :] = tflag[:, [0], :].repeat(var.shape[1], 1)
     f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    setattr(f, 'VAR-LIST', ''.join(varnames))
+    setattr(f, 'NVARS', len(varnames))
     f.sync()
     f.close()
     if config['repair_aero']:
@@ -206,17 +218,25 @@ def make_out(config, dates):
     """
     from PseudoNetCDF.sci_var import extract
     out = PseudoNetCDFFile()
+    out.dimensions = OrderedDict()
+    out.variables = OrderedDict()
+
     file_objs = get_files(config, dates[0], None)
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
     geosf = [f for f in file_objs if 'tau0' in f.variables.keys()][0]
+    outnames = OrderedDict()
+    for src, name, expr, unit in config['mappings']:
+        if not [src, name, expr, unit] == ['SOURCE', 'MECHSPC', 'GEOS_EXPRESSION', 'UNIT']:
+            outnames[name] = 0
+
     d = out.createDimension('TSTEP', len(dates))
     d.setunlimited(True)
-    out.createDimension('LAY', len(metf.dimensions['LAY']))
-    out.createDimension('PERIM', len(metf.dimensions['PERIM']))
     out.createDimension('DATE-TIME', len(metf.dimensions['DATE-TIME']))
-    out.createDimension('VAR', len(config['mappings']))
+    out.createDimension('LAY', len(metf.dimensions['LAY']))
+    out.createDimension('VAR', len(outnames))
+    out.createDimension('PERIM', len(metf.dimensions['PERIM']))
     out.createDimension('nv', len(metf.dimensions['nv']))
-    
+
     mlatb = metf.variables['latitude_bounds']
     out.createVariable('latitude_bounds', 'f', ('PERIM', 'nv'), units = mlatb.units, values = mlatb[:])
 
@@ -244,17 +264,18 @@ def make_out(config, dates):
     out.createVariable('geos_longitude', 'f', ('PERIM',), units = glon.units, values = glon[:])
 
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
+    var.long_name = 'TFLAG'.ljust(16);
+    var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
+    var.units = "<YYYYDDD,HHMMSS>"
     for pk in metf.ncattrs():
         setattr(out, pk, getattr(metf, pk))
-    setattr(out, 'VAR-LIST', ''.join([name.ljust(16) for src, name, expr, unit in config['mappings']]))
-    setattr(out, 'NVARS', len(config['mappings']))
+    setattr(out, 'VAR-LIST', ''.join([name.ljust(16) for name in outnames]))
+    setattr(out, 'NVARS', len(outnames))
     setattr(out, 'SDATE', int(dates[0].strftime('%Y%j')))
     setattr(out, 'STIME', int(dates[0].strftime('%H%M%S')))
     setattr(out, 'EDATE', int(dates[-1].strftime('%Y%j')))
     setattr(out, 'ETIME', int(dates[-1].strftime('%H%M%S')))
-    var.long_name = 'TFLAG'.ljust(16);
-    var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
-    var.units = "<YYYYDDD,HHMMSS>"
+    
     for src, name, expr, outunit in config['mappings']:
         var = out.createVariable(name, 'f', ('TSTEP', 'LAY', 'PERIM'))
         var.long_name = name.ljust(16);
