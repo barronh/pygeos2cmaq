@@ -26,9 +26,10 @@ def plot_omi(ax, lon_bnds, lat_bnds, omipaths, key = 'O3Profile', airden = None,
     lon_bnds = lon_bnds[:]
     lat_bnds = lat_bnds[:]
     if len(omipaths) == 0:
-        return
+        return None, None
     
     omipaths = reduce(list.__add__, [glob(i) for i in omipaths])
+    omipaths.sort()
     for path in omipaths:
         print path
         f = h5py.File(path, mode = 'r')
@@ -51,20 +52,17 @@ def plot_omi(ax, lon_bnds, lat_bnds, omipaths, key = 'O3Profile', airden = None,
             altitude = maskfilled(altitudev).reshape(-1, nk)
             dz = -(altitude[:, 1:] - altitude[:, :-1]) * 1000. * 100.
             #Lacis 1990 1 DU = 2.69e16 molecules cm-2
-            species = species / dz * 2.69e16 # [=] molec cm-3
-            midpressure = pressure[:, :-1] + np.diff(pressure, axis = 1) / 2.
-            w = get_interp_w(airdenvert, midpressure.mean(0)[::-1])
-            myairden = (w * airden[None, :]).sum(1)[::-1]
-            species = species / myairden[:] # molec/molec # vmr
+            species = species * .001 / dz # cm /cm # vrm
             x = pressure[inboth]
             y = species[inboth]
             allx.append(x)
             ally.append(y)
         else:
-            warn('No data found for %s' % path)
+            warn('No data found for %s: lons (%s, %s) and lats (%s, %s); lonbs (%s, %s) and latbs (%s, %s);' % (path, lons.min(), lons.max(), lats.min(), lats.max(), lon_bnds.min(), lon_bnds.max(), lat_bnds.min(), lat_bnds.max()))
     
     if len(allx) == 0:
-        return            
+        print '*' * 80 + '\n\nNo OMI DATA FOUND AT ALL\n\n' + '*'*80
+        return None, None
     
     var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
     var = var.reshape(-1, var.shape[-1])
@@ -87,8 +85,9 @@ def plot_tes(ax, lon_bnds, lat_bnds, tespaths):
     lon_bnds = lon_bnds[:]
     lat_bnds = lat_bnds[:]
     if len(tespaths) == 0:
-        return
+        return None, None
     tespaths = reduce(list.__add__, [glob(i) for i in tespaths])
+    tespaths.sort()
     for path in tespaths:
         f = Dataset(path)
         lats = f.variables['latitude'][:][:, None]
@@ -106,7 +105,7 @@ def plot_tes(ax, lon_bnds, lat_bnds, tespaths):
             warn('No data found for %s' % path)
     
     if len(allx) == 0:
-        return            
+        return None, None
     var = np.ma.masked_values(np.ma.concatenate(ally, axis = 0), -999.) * 1e9
     var = var.reshape(-1, var.shape[-1])
     vertcrd = np.ma.masked_values(np.ma.concatenate(allx, axis = 0), -999.).mean(0)
@@ -231,10 +230,12 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
                 edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
             if len(tespaths) > 0:
                 tesl, tesr = plot_tes(ax, lonbs, latbs, tespaths)
-                llines.append((tesl, tesr))
+                if not tesl is None:
+                    llines.append((tesl, tesr))
             if len(omipaths) > 0:
                 omil, omir = plot_omi(ax, lonbs, latbs, omipaths, airden = f.variables['AIRDEN'][:].mean(0).mean(1), airdenvert = vertcrd)
-                llines.append((omil, omir))
+                if not omil is None:
+                    llines.append((omil, omir))
 
         try:
             title = '%s to %s' % (sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
@@ -331,6 +332,7 @@ if __name__ == '__main__':
         options.variables = ['O3']
     if len(options.tespaths) > 0:
         options.tespaths = reduce(list.__add__, [tp.split(',') for tp in options.tespaths])
+        
     if len(options.omipaths) > 0:
         options.omipaths = reduce(list.__add__, [op.split(',') for op in options.omipaths])
     fig = plot(args, keys = options.variables, prefix = options.prefix, scale = options.scale, minmax = eval(options.minmax), minmaxq = eval(options.minmaxq), sigma = options.sigma, maskzeros = options.maskzeros, outunit = options.outunit, tespaths = options.tespaths, omipaths = options.omipaths, edges = options.edges)
