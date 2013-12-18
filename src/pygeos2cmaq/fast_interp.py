@@ -35,11 +35,10 @@ def get_interp_w(x, xn):
     if nmin < omin:
         # Needs special case extrapolation code
         for i in np.ma.where(xn <= x.min())[0]:
-            w[i, 0] = pct_dx[i, 0]
+            w[i, 0] = 1 - pct_dx[i, 0]
             w[i, 1] = 1 - w[i, 0]
-    w = w.filled(0)
     try:
-        np.testing.assert_allclose(w.sum(1), 1, rtol=1e-6)
+        np.testing.assert_allclose(w.sum(1).filled(1), 1, rtol=1e-6)
     except:
         print w.sum(1); print w
         raise
@@ -49,6 +48,13 @@ def get_interp_w(x, xn):
     return w
 
 if __name__ == '__main__':
+    x = np.array([1.,2.,3.])
+    xn = np.array([.5, 1.75, 5.])
+    y = np.array([3.,6.,9.])
+    yhat2 = (get_interp_w(x, xn) * y[None]).sum(1)
+    yhat1 = np.array([  1.5 ,   5.25,  15.  ])
+    assert((yhat1 == yhat2).all())
+
     xn = np.array([ 1. ,  4.5,  8. ])
     x = np.array([  0.,   1.,   2.,   3.,   4.,   5.,   6.,   7.,   8.,   9.,  10.])
     y = np.array([ 10.,  15.,  20.,  25.,  30.,  35.,  40.,  45.,  50.,  55.,  60.])
