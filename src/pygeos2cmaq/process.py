@@ -6,8 +6,9 @@ from datetime import datetime, timedelta
 import numpy as np
 from numpy import *
 from readers import *
+from timeformatters import *
 from fast_interp import get_interp_w
-from PseudoNetCDF import PseudoNetCDFFile
+from PseudoNetCDF import PseudoNetCDFFile, interpvars
 
 from myio import myio
 myioo = myio()
@@ -19,14 +20,21 @@ def timeit(name, new):
     if new:
         timeit.ts.append(time())
         timeit.names.append(name)
-        print name
+        status(name)
     else:
-        print '***%s min:' % timeit.names.pop(-1), (time() - timeit.ts.pop(-1)) / 60
+        status('***%s min: %s' % (timeit.names.pop(-1), (time() - timeit.ts.pop(-1)) / 60))
 timeit.ts = []
 timeit.names = []
+
 def process(config, verbose = False):
     """
     Take the configuration file and create boundaries
+    
+    This routine:
+        1. gets input files (pre vertically interpolated and variable screened; see get_files)
+        2. performs algebraic mapping of species
+        3. does unit conversion
+    
     """
     if verbose: timeit('STARTING', True)
     alldates = get_dates(config)
@@ -34,6 +42,12 @@ def process(config, verbose = False):
     outpathtemp, tsf = config['out_template']
     for date in alldates:
         outpaths[eval(tsf)(date, outpathtemp)].append(date)
+    sources = defaultdict(lambda: set('time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split()))
+    for src, name, expr, unit in config['mappings']:
+        tmp = defaultdict(lambda: 1, np = np)
+        eval(expr, None, tmp)
+        tmp.pop('np')
+        sources[src].update(set(tmp.keys()))
     outpaths = [(k, v) for k, v in outpaths.iteritems()]
     outpaths.sort()
     errors = set()
@@ -43,8 +57,9 @@ def process(config, verbose = False):
         tflag = out.variables['TFLAG']
         curdate = 0
         if verbose: timeit('GET_FILES', True)
+        get_files = file_getter(config = config, out = out, sources = sources, verbose = verbose).get_files
         for di, date in enumerate(dates):
-            file_objs = get_files(config, date, out.lonlatcoords, verbose = verbose)
+            file_objs = get_files(date)
             jday = int(date.strftime('%Y%j'))
             itime = int(date.strftime('%H%M%S'))
             tflag[di, :, :] = np.array([[jday, itime]])
@@ -78,8 +93,13 @@ def process(config, verbose = False):
 
 def output(out, outpath, config):
     """
+    Make final unit conversions, add log information
+    and save output to disk
+    
+      out     - PseudoNetCDFFile with output data
+      outpath - Path for output
+      config  - configuration dictionary
     """
-    from netCDF4 import Dataset
     from repair_ae import repair_ae
     from PseudoNetCDF.pncgen import pncgen
     tmp = defaultdict(lambda: 1)
@@ -120,7 +140,7 @@ def output(out, outpath, config):
     var.var_desc = "Timestep-valid flags:  (1) YYYYDDD or (2) HHMMSS".ljust(80)
     var.units = "<YYYYDDD,HHMMSS>"
     var[:, :, :] = tflag[:, [0], :].repeat(var.shape[1], 1)
-    f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF4_CLASSIC', verbose = False)
+    f = pncgen(out, outpath, inmode = 'r', outmode = 'w', format = 'NETCDF3_CLASSIC', verbose = False)
     setattr(f, 'VAR-LIST', ''.join(varnames))
     setattr(f, 'NVARS', len(varnames))
     f.sync()
@@ -130,105 +150,104 @@ def output(out, outpath, config):
         repair_ae(f)
         f.sync()
         f.close()
-    #del f, out
 
-def pres_from_sigma(sigma, pref, ptop, avg = False):
-    pres = sigma * (pref - ptop) + ptop
-    if avg:
-        pres = pres[:-1] + np.diff(pres) / 2.
-    return pres
-    
 def evalandunit(out, di, name, expr, variables, verbose = False):
-    pref = 101325.
-    vert_out = pres_from_sigma(out.VGLVLS, pref, out.VGTOP, avg = True)
-    if 'sigma-mid' in variables.keys():
-        sigma = np.array(variables['sigma-mid']).repeat(2, 0)[1:-1].reshape(-1, 2).mean(1)
-        vert_in = pres_from_sigma(sigma, pref, out.VGTOP)
-    elif 'layer' in variables.keys():
-        vert_in = variables['layer'] * 100.
-    else:
-        raise KeyError('No sigma-mid or layer in %s' % str(variables.keys()))
+    """
+    Evaluates an expression in the context of a dictionary
+    and extracts units from variables used in the evaluation
+    """
     
-    x = defaultdict(lambda: 1)
-    x['np'] = np
-    eval(expr, None, x)
-    key = [k for k in x.keys() if k != 'np'][0]
+    # Create a dictionary that will create
+    # keys in response to an expression
+    # add the numpy library as np
+    tmpdict = defaultdict(lambda: 1, np = np)
+    
+    # Evaluate the expression to generate keys
+    # used in the expression
+    eval(expr, None, tmpdict)
+
+    # Remove numpy from generated keys
+    tmpdict.pop('np')
+    
+    # Get first key to pull meta data
+    key = tmpdict.keys()[0]
+    
+    # Get a variable to pull meta data
     metavar = variables[key]
+    
+    # Get the original units from the meta variable
     origunits = metavar.units.strip()
+    
+    # Get the output variables and store the intended
+    # units 
     outvar = out.variables[name]
     outunit = outvar.units.strip()
-    val = eval(expr, None, variables)
-    if verbose: timeit('VINTERP', True)
-    outval = vinterp(val, vert_in, vert_out)
-    if verbose: timeit('VINTERP', False)
+    
+    # Evaluate the expression to create output data
+    outval = eval(expr, None, variables)
+    
+    # Store present unit and add a history to the output variable
     unitnow = origunits
     outvar.history = expr
+    
     if unitnow == "None":
+        # Units are unknown, which indicates the PROFILE input
         warn('No unit was provided; assuming CMAQ unit; Most likely from PROFILE', stacklevel = 1)
     else:
         if outunit in ('micrograms/m**3',):
+            # For mass concentration units, the kg/mol varies
+            # per species, so this multiplier must be applied here
             outval *= metavar.kgpermole
             outvar.history += '; RESULT * %s' % metavar.kgpermole
+            
+            # Update present unit to reflect multiplication
             unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
         
-            # Special case where profile is actually assumed to be in appropriate units
-            unitnow = unitnow.replace('kg/mol*ppmV', 'micrograms/m**3')
         elif origunits in ('ppbC',):
+            # For units of ppbC, divide by carbon and update unit
             outval /= metavar.carbon
             unitnow = 'ppbv'
             outvar.history += '; RESULT / %s' % metavar.carbon
+        # Store present unit in variable
         outvar.unitnow = unitnow
+        
+    
+    # Store output variable in outvar starting at last
+    # output
     outvar[di:di + outvar.shape[0]] += outval.squeeze()
+
+    # Update variables original unit
+    # to help in final unit conversion
     outvar.origunits = origunits
+    
+    # Add properties from the metavariable
+    # Note that this will overwrite properties 
+    # from previous mapping
     for k in metavar.ncattrs():
         if k not in outvar.ncattrs():
             setattr(outvar, k, getattr(metavar, k))
 
     return outval, origunits
     
-outval = np.zeros((0,))
-def vinterp(val, vert_in, vert_out):
-    """
-    Performs vertical interpolation using linear algorithms
-    """
-    global outval
-    if (outval.shape[0], outval.shape[-1]) != (val.shape[0], val.shape[-1]):
-        outval = zeros((val.shape[0], len(vert_out), val.shape[-1]), dtype = val.dtype)
-    w = get_interp_w(vert_in, vert_out)
-    newvals = (w[:, :, None, None] * val[:].swapaxes(0, 1)[None, :]).sum(1).swapaxes(0, 1)
-    outval[:, :, :] = newvals
-    if not (vert_out.max() > vert_in.max() or vert_out.min() < vert_in.min()):
-        for ti in [0, val.shape[0] - 1]:
-            for pi in [0, val.shape[-1] - 1]:
-                if vert_out.max() > vert_in.max():
-                    right = val[ti, 0, pi] + np.diff(val[ti, :2, pi][::-1]) / np.diff(vert_in[:2][::-1]) * (vert_out[0] - vert_in[0])
-                else:
-                    right = None
-            
-                if vert_out.min() > vert_in.min():
-                    left = val[ti, -1, pi] + np.diff(val[ti, -2:, pi][::-1]) / np.diff(vert_in[-2:][::-1]) * (vert_out[-1] - vert_in[-1])
-                else:
-                    left = None
-            
-                testval = np.interp(vert_out[::-1], vert_in[:val.shape[1]][::-1], val[ti, ::-1, pi], left = left, right = right)[::-1]
-                try:
-                    np.testing.assert_allclose(newvals[ti, :, pi], testval, rtol=1e-05, atol=0, err_msg='', verbose=True)
-                except Exception, e:
-                    error(str(e))
-            
-
-    return outval
-
 def make_out(config, dates):
     """
-    Return a file to fill with data
+    Make an output file with appropriate dimensions and variables
+
+      config - configuration dictionary
+      dates  - iterable of dates
     """
+    
     from PseudoNetCDF.sci_var import extract
     out = PseudoNetCDFFile()
+    
+    # Ordered entries are necessary for 
+    # consistency with IOAPI
     out.dimensions = OrderedDict()
     out.variables = OrderedDict()
 
-    file_objs = get_files(config, dates[0], None)
+    # Get files for the first date
+    get_files = file_getter(config = config, out = None, sources = None).get_files
+    file_objs = get_files(dates[0])
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
     geosf = [f for f in file_objs if 'tau0' in f.variables.keys()][0]
     outnames = OrderedDict()
@@ -324,85 +343,186 @@ def get_group(file_objs, src, dates):
     else:
         raise KeyError('No file provided has the %s group' % src)
 
-def simpledate(date, p):
-    return date.strftime(p)
-def minus1hour(date, p):
-    return (date - timedelta(hours = 1)).strftime(p)
+class file_getter(object):
+    def __init__(self, config, out, sources, verbose = False):
+        """
+        Initialize a file getting object that caches old files
+        for reuse when necessary.
+          config   - configuration dictionary
+          out      - output file that has lonlatcoords, VGLVLS, VGTOP
+          sources  - dictionary (key = groups, values = variables) that
+                     identify which groups and variables will be used 
+                    from GEOS-Chem will be used
+          verbose  - True to see more details
+        """
+        self._config = config
+        self._out = out
+        self._sources = sources
+        self._verbose = verbose
+        self.last_file_paths = None
+        self.last_file_objs = None
+        if out is None:
+            self._coordstr = None
+        else:
+            self._coordstr = out.lonlatcoords
+        self.last_file_paths = [''] * len(config['file_templates'])
+        self.last_file_objs = [PseudoNetCDFFile()] * len(config['file_templates'])
+        if out is None:
+            self.vert_out = None
+        else:
+            self._pref = 101325.
+            self.vert_out = pres_from_sigma(out.VGLVLS, self._pref, out.VGTOP, avg = True)
 
-last_coordstr = "-1-"
-def get_files(config, date, coordstr, verbose = False):
-    """
-    Put date into file path and return open files
-    """
-    from PseudoNetCDF.sci_var import extract, slice_dim, getvarpnc
-    from PseudoNetCDF.cmaqfiles.profile import profile
-    import gc
-    global last_file_paths
-    global file_objs
-    global last_coordstr
-    global last_file_objs
-    file_paths = [(r, eval(tsf)(date, p)) for r, p, tsf in config['file_templates']]
-    if coordstr != last_coordstr:
-        last_file_paths = [''] * len(file_paths)
-        last_file_objs = [PseudoNetCDFFile()] * len(file_paths)
-        gc.collect()
-    if file_paths == last_file_paths:
-        return last_file_objs
-    else:
+    def get_files(self, date):
+        """
+        Put date into file_templates and return open files,
+        where all files have been vertically interpolated
+        and only variables that will be used are present
+    
+          date     - date to use for files
+        """
+    
+        from PseudoNetCDF.sci_var import extract, slice_dim, getvarpnc
+        from PseudoNetCDF.cmaqfiles.profile import profile
+        import gc
+        
+        # make quick references to instance variables
+        sources = self._sources
+        verbose = self._verbose
+        coordstr = self._coordstr
+        vert_out = self.vert_out
+        
+        # Fill file path templates with date using the time
+        # function provided
+        file_paths = [(r, eval(tsf)(date, p)) for r, p, tsf in self._config['file_templates']]
+        
+        # Return cached files if appropriate
+        if file_paths == self.last_file_paths:
+            return self.last_file_objs
+
+
+        # If coordstr is not none, this is
+        # a data extraction call and the status should be
+        # updated
         if coordstr is not None:
             status('')
             status('-' * 40)
             status("Getting files for " + str(date))
             status('-' * 40)
             status('')
+            
+        # For each file, use the reader (r) to open the
+        # path (p)
         for fi, (r, p) in enumerate(file_paths):
-            lp = last_file_paths[fi]
-            nf = last_file_objs[fi]
+            # If last path is this path
+            # no need to update
+            lp = self.last_file_paths[fi]
+            nf = self.last_file_objs[fi]
             if p != lp:
                 if verbose: timeit('GET_FILE %s' % p, True)
-                try:
-                    nf.close()
-                    onf = nf = eval(r)(p)
-                    status('Opening %s with %s' % (p, r), show = False)
-                    if coordstr is not None:
-                        if isinstance(nf, profile):
-                            pnf = nf
-                            metf = [f for f in last_file_objs if 'PERIM' in f.dimensions][0]
-                            nc, nr = metf.NCOLS, metf.NROWS
-                            nf.createDimension('PERIM', (nc + nr + 2) * 2)
-                            for k, v in nf.variables.items():
-                                if k in ('sigma', 'sigma-mid'): continue
-                                nv = np.concatenate([v[:, [0]].repeat(nc + 1, 1), v[:, [1]].repeat(nr + 1, 1), v[:, [2]].repeat(nc + 1, 1), v[:, [3]].repeat(nr + 1, 1)], axis = 1)
-                                vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
-                                nf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'PERIM'), values = nv[None,:], kgpermole = 1., **vard)
-                            nf.groups = dict(PROFILE = nf)
-                        else:
-                            if hasattr(nf, 'groups'):
-                                for grpk, grpv in nf.groups.items():
-                                    nf.groups[grpk] = extract(grpv, [coordstr])
-                            else:
-                                nf = extract(nf, [coordstr])
-                    else:
-                        with warnings.catch_warnings():
-                            warnings.simplefilter("ignore")
-                            nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split())
+
+                # Close old file to prevent memory leaks
+                nf.close()
+                
+                status('Opening %s with %s' % (p, r), show = False)
+                onf = nf = eval(r)(p)
+                
+                if coordstr is None:
+                    # Coordstr is None, so this call is just for some
+                    # meta-data
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split())
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
-                        nf.NCOLS = onf.NCOLS
-                        nf.NROWS = onf.NROWS
-                except Exception, e:
-                    raise Exception("Could not open %s with %s: %s" % (p, r, str(e)))
+                else:
+                    # If coordstr is not None, this is a real data
+                    # call
+                    #
+                    # Real data calls require vertical interpolation
+                    
+                    ## Calculate the vertical coordinate of
+                    ## the input file
+                    vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP)
+
+                    needsvinterp = np.all([vert_out != vert_in])
+                    weights = get_interp_w(vert_in, vert_out)
+                    
+                    if isinstance(nf, profile):
+                        if needsvinterp:
+                            nf = interpvars(nf, weights, dimension = 'sigma-mid')
+                        metf = [f for f in self.last_file_objs if 'PERIM' in f.dimensions][0]
+                        ## profile files need to be converted
+                        ## to METBDY coordinates by repeating
+                        ## boundaries
+                        nf = profile_to_bdy(nf, ncols = metf.NCOLS, nrows = metf.NROWS)
+                    elif isinstance(nf, bpch):
+                        ## Only extract groups that are used
+                        ## in mappings, and only extract variables
+                        ## in those groups that are used
+                        grpkeys = set(nf.groups.keys())
+                        srcgrps = set(sources.keys()).intersection(grpkeys)
+                        nonsrcgrps = grpkeys.difference(sources)
+                        for grpk in srcgrps:
+                            grp = nf.groups[grpk]
+                            grp = nf.groups[grpk] = getvarpnc(grp, sources[grpk])
+                            
+                            # If needs interpolation, first extract unique points
+                            # then interpolate, then repeat unique points for
+                            # all boundary points
+                            if needsvinterp:
+                                grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
+                                # GEOS-Chem files can have multiple layer
+                                # dimensions that share pressure coordinates
+                                # but may have fewer output points
+                                #
+                                # for each dimensions, interpolation must 
+                                # be done separately
+                                for dimk in grp.dimensions:
+                                    if dimk[:5] == 'layer':
+                                        nlays = len(grp.dimensions[dimk])
+                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = 'layer47')
+                            
+                            # Extract values that are appropriate
+                            # for each boundary grid cell
+                            nf.groups[grpk] = extract(grp, [coordstr])
+
+                        for grpk in nonsrcgrps:
+                            # Unused groups are explicitly
+                            # removed
+                            del nf.groups[grpk]
+                        
+                    elif isinstance(nf, (Dataset, NetCDFFile, ioapi, PseudoNetCDFFile)):
+                        ## Dataset and NetCDFFile could have groups,
+                        ## but that is not treated at this time.
+                        
+                        # If needs interpolation, first extract unique points
+                        # then interpolate, then repeat unique points for
+                        # all boundary points
+                        if needsvinterp:
+                            nf = extract(nf, [coordstr], unique = True)
+                            if 'LAY' in nf.dimensions:
+                                nf = interpvars(nf, weights = weights, dimension = 'LAY')
+                            else:
+                                nf = interpvars(nf, weights = weights, dimension = 'layer47')
+                        nf = extract(nf, [coordstr])
+                    else:
+                        raise IOError('Unknown type %s; add type to readers' % type(nf))
+                
                 if verbose: timeit('GET_FILE %s' % p, False)
 
-            last_file_objs[fi] = nf
-        last_file_paths = file_paths
-        last_coordstr = coordstr
-        return last_file_objs
+            self.last_file_objs[fi] = nf
+        self.last_file_paths = file_paths
+        return self.last_file_objs
 
 def get_dates(config):
     """
-    Get all dates
+    Get all dates using, start_date, end_date and time_incr
+    
+    start_date - first date object
+    end_date - last date object
+    time_incr - timedelta object to increment
     """
     end_date = config['end_date']
     time_incr = config['time_incr']
@@ -413,3 +533,50 @@ def get_dates(config):
         alldates.append(date)
         date = date + time_incr
     return alldates
+
+def pres_from_sigma(sigma, pref, ptop, avg = False):
+    """
+    Calculates pressure from sigma coordinates
+        pres = sigma * (pref - ptop) + ptop
+    where
+        sigma = a sigma coordinate
+        pref  = surface reference pressure    
+        ptop  = the top of the model
+        avg   = True if should be an average from edges
+    """
+    pres = sigma * (pref - ptop) + ptop
+    if avg:
+        pres = pres[:-1] + np.diff(pres) / 2.
+    return pres
+    
+def get_vert_in(nf, pref, vgtop):
+    """
+    Calculates a pressure coordinate
+    from sigma coordinates in a netcdf-like
+    file
+    """
+    if 'sigma-mid' in nf.variables.keys():
+        sigma = np.array(nf.variables['sigma-mid'])
+        # assuming VGTOP of model is consistent with
+        # VGTOP of profile
+        vert_in = pres_from_sigma(sigma, pref, vgtop)
+    elif 'layer' in nf.variables.keys():
+        vert_in = nf.variables['layer'] * 100.
+    else:
+        raise KeyError('No sigma-mid or layer in %s' % str(nf.variables.keys()))
+    return vert_in
+
+def profile_to_bdy(nf, ncols, nrows):
+    """
+    nf - profile file (netcdf-like)
+    ncols - number of columns
+    nrows - number of rows
+    """
+    nf.createDimension('PERIM', (ncols + nrows + 2) * 2)
+    for k, v in nf.variables.items():
+        if k in ('sigma', 'sigma-mid'): continue
+        nv = np.concatenate([v[:, [0]].repeat(ncols + 1, 1), v[:, [1]].repeat(nrows + 1, 1), v[:, [2]].repeat(ncols + 1, 1), v[:, [3]].repeat(nrows + 1, 1)], axis = 1)
+        vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
+        nf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'PERIM'), values = nv[None,:], kgpermole = 1., **vard)
+    nf.groups = dict(PROFILE = nf)
+    return nf
