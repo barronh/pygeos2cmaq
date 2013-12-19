@@ -28,6 +28,7 @@ def process(config, verbose = False):
     """
     Take the configuration file and create boundaries
     """
+    if verbose: timeit('STARTING', True)
     alldates = get_dates(config)
     outpaths = defaultdict(lambda: [])
     outpathtemp, tsf = config['out_template']
@@ -41,23 +42,28 @@ def process(config, verbose = False):
         out = make_out(config, dates)
         tflag = out.variables['TFLAG']
         curdate = 0
+        if verbose: timeit('GET_FILES', True)
         for di, date in enumerate(dates):
-            file_objs = get_files(config, date, out.lonlatcoords)
+            file_objs = get_files(config, date, out.lonlatcoords, verbose = verbose)
             jday = int(date.strftime('%Y%j'))
             itime = int(date.strftime('%H%M%S'))
             tflag[di, :, :] = np.array([[jday, itime]])
+        if verbose: timeit('GET_FILES', False)
         for src, name, expr, outunit in config['mappings']:
             status('\t'+name)
+            if verbose: timeit('MAP %s' % name, True)
             try:
                 grp = get_group(file_objs, src, dates)
-                if verbose: timeit('EVALUNIT', True)
                 evalandunit(out, curdate, name, expr, grp.variables, verbose = verbose)
-                if verbose: timeit('EVALUNIT', False)
             except Exception, e:
                 errors.add((src, name, expr, str(e)))
                 error("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
+            if verbose: timeit('MAP %s' % name, False)
+
         curdate += len(file_objs[0].dimensions['time'])
+        if verbose: timeit('OUTPUT', True)
         output(out, outpath, config)
+        if verbose: timeit('OUTPUT', False)
     if len(errors) > 0:
         status('******************')
         status('**** Start Errors:')
@@ -68,6 +74,7 @@ def process(config, verbose = False):
         status('******************')
         status('**** End Errors:')
         status('******************')
+    if verbose: timeit('STARTING', False)
 
 def output(out, outpath, config):
     """
@@ -323,7 +330,7 @@ def minus1hour(date, p):
     return (date - timedelta(hours = 1)).strftime(p)
 
 last_coordstr = "-1-"
-def get_files(config, date, coordstr):
+def get_files(config, date, coordstr, verbose = False):
     """
     Put date into file path and return open files
     """
@@ -352,6 +359,7 @@ def get_files(config, date, coordstr):
             lp = last_file_paths[fi]
             nf = last_file_objs[fi]
             if p != lp:
+                if verbose: timeit('GET_FILE %s' % p, True)
                 try:
                     nf.close()
                     onf = nf = eval(r)(p)
@@ -385,6 +393,8 @@ def get_files(config, date, coordstr):
                         nf.NROWS = onf.NROWS
                 except Exception, e:
                     raise Exception("Could not open %s with %s: %s" % (p, r, str(e)))
+                if verbose: timeit('GET_FILE %s' % p, False)
+
             last_file_objs[fi] = nf
         last_file_paths = file_paths
         last_coordstr = coordstr
