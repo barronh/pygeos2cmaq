@@ -154,7 +154,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
             end_north = start_north + x
             start_west = end_north
             end_west = start_west + y
-            X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, vertcrd)
+            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, vertcrd)
             patchess = axs.pcolor(X, Y, var[:, start_south:end_south], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             import pdb; pdb.set_trace()
             if not map:
@@ -163,7 +163,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 axs.set_xlabel('E to W km')
                 axs.set_xlim(*axs.get_xlim()[::-1])
                 
-            X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, vertcrd)
+            X, Y = np.meshgrid(np.arange(-1, x - 1) * f.XCELL * xyfactor, vertcrd)
             patchesn = axn.pcolor(X, Y, var[:, start_north:end_north], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             if reversevert: axn.set_ylim(*axn.get_ylim()[::-1])
             if not map:
@@ -182,10 +182,10 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 axe.set_xlabel('N to S km')
                 axe.set_xlim(*axe.get_xlim()[::-1])
             if map:
-                X, Y = np.meshgrid(vertcrd, np.arange(y) * f.YCELL)
+                X, Y = np.meshgrid(vertcrd, np.arange(-1, y - 1) * f.YCELL)
                 patchesw = axw.pcolor(X, Y, var[:, start_west:end_west].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             else:
-                X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, vertcrd)
+                X, Y = np.meshgrid(np.arange(-1, y - 1) * f.YCELL * xyfactor, vertcrd)
                 patchesw = axw.pcolor(X, Y, var[:, start_west:end_west], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axw.set_ylim(*axw.get_ylim()[::-1])
                 axw.set_title('West')
