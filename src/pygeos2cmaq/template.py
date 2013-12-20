@@ -12,6 +12,9 @@ time_incr: 1 hours
 # the out_template
 out_template: ['geos2cmaq.%%Y%%m%%d.nc', minus1hour]
 
+# Do not over-write (clobber) outputs
+no_clobber: False
+
 # Aerosol surface area and number concentration
 # can be updated to be consistent with concentrations
 repair_aero: True

@@ -2,6 +2,7 @@ import warnings
 from collections import defaultdict, OrderedDict
 from string import uppercase
 from datetime import datetime, timedelta
+import os
 
 import numpy as np
 from numpy import *
@@ -52,7 +53,11 @@ def process(config, verbose = False):
     outpaths.sort()
     errors = set()
     for outpath, dates in outpaths:
-        status(outpath)
+        status('Starting %s' % outpath)
+        if config['no_clobber']:
+            if os.path.exists(outpath):
+                status('Already exists, skipping %s ...' % outpath)
+                continue
         out = make_out(config, dates)
         tflag = out.variables['TFLAG']
         curdate = 0
