@@ -455,7 +455,7 @@ class file_getter(object):
                     ## the input file
                     vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP)
 
-                    needsvinterp = np.all([vert_out != vert_in])
+                    needsvinterp = not np.all([vert_out == vert_in])
                     weights = get_interp_w(vert_in, vert_out)
                     
                     if isinstance(nf, profile):
@@ -491,7 +491,7 @@ class file_getter(object):
                                 for dimk in grp.dimensions:
                                     if dimk[:5] == 'layer':
                                         nlays = len(grp.dimensions[dimk])
-                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = 'layer47')
+                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = dimk)
                             
                             # Extract values that are appropriate
                             # for each boundary grid cell
