@@ -146,8 +146,17 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                      
             x = f.NCOLS + 1
             y = f.NROWS + 1
+            start_south = 0
+            end_south = start_south + x
+            start_east = end_south
+            end_east = start_east + y
+            start_north = end_east
+            end_north = start_north + x
+            start_west = end_north
+            end_west = start_west + y
             X, Y = np.meshgrid(np.arange(x)[1:] * f.XCELL * xyfactor, vertcrd)
-            patchess = axs.pcolor(X, Y, var[:, :x-1], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+            patchess = axs.pcolor(X, Y, var[:, start_south:end_south], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+            import pdb; pdb.set_trace()
             if not map:
                 if reversevert: axs.set_ylim(*axs.get_ylim()[::-1])
                 axs.set_title('South')
@@ -155,7 +164,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 axs.set_xlim(*axs.get_xlim()[::-1])
                 
             X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, vertcrd)
-            patchesn = axn.pcolor(X, Y, var[:, x+y:x+y+x], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+            patchesn = axn.pcolor(X, Y, var[:, start_north:end_north], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             if reversevert: axn.set_ylim(*axn.get_ylim()[::-1])
             if not map:
                 axn.set_title('North')
@@ -163,21 +172,21 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
 
             if map:
                 X, Y = np.meshgrid(vertcrd, np.arange(y) * f.YCELL)
-                patchese = axe.pcolor(X, Y, var[:, x:x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+                patchese = axe.pcolor(X, Y, var[:, start_east:end_east].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axe.set_xlim(*axe.get_xlim()[::-1])
             else:
                 X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, vertcrd)
-                patchese = axe.pcolor(X, Y, var[:, x:x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+                patchese = axe.pcolor(X, Y, var[:, start_east:end_east], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axe.set_ylim(*axe.get_ylim()[::-1])
                 axe.set_title('East')
                 axe.set_xlabel('N to S km')
                 axe.set_xlim(*axe.get_xlim()[::-1])
             if map:
                 X, Y = np.meshgrid(vertcrd, np.arange(y) * f.YCELL)
-                patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+                patchesw = axw.pcolor(X, Y, var[:, start_west:end_west].swapaxes(0,1), cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
             else:
                 X, Y = np.meshgrid(np.arange(y) * f.YCELL * xyfactor, vertcrd)
-                patchesw = axw.pcolor(X, Y, var[:, x+y+x:x+y+x+y], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
+                patchesw = axw.pcolor(X, Y, var[:, start_west:end_west], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
                 if reversevert: axw.set_ylim(*axw.get_ylim()[::-1])
                 axw.set_title('West')
                 axw.set_xlabel('S to N km')
@@ -203,7 +212,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 title = var_name
             fig.suptitle(title)
             fig.colorbar(patchesw, cax = cax, boundaries = bins)
-            fig.savefig('%s_%s_%s.png' % (prefix, var_name, func))
+            fig.savefig('%s_%s_%s.pdf' % (prefix, var_name, func))
             pl.close(fig)
     
 if __name__ == '__main__':
