@@ -7,7 +7,7 @@ def run():
     parser.set_usage("Usage: %prog [-tq] \n"+(" "*16)+" [-i <init name>] [-f <final name>] <yamlfile>")
     parser.add_option("-t", "--template", dest = "template", action = "store_true", default = False, help="Output template on standard out (configurable with -m and -c", metavar="Template")
 
-    parser.add_option("-v", "--verbose", dest = "verbose", action = "store_true", default = False, help = "extra output for debugging", metavar = "VERBOSE")
+    parser.add_option("-v", "--verbose", dest = "verbose", action = "count", default = 0, help = "extra output for debugging", metavar = "VERBOSE")
     
     paths = glob(os.path.join(os.path.dirname(__file__), 'mapping', '*_*.yaml'))
     mechanisms = ', '.join(['_'.join(path.split('/')[-1].split('_')[1:])[:-5] for path in paths])

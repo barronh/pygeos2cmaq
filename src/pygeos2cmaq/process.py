@@ -27,7 +27,7 @@ def timeit(name, new):
 timeit.ts = []
 timeit.names = []
 
-def process(config, verbose = False):
+def process(config, verbose = 0):
     """
     Take the configuration file and create boundaries
     
@@ -37,7 +37,7 @@ def process(config, verbose = False):
         3. does unit conversion
     
     """
-    if verbose: timeit('STARTING', True)
+    if verbose > 1: timeit('PROCESSING', True)
     alldates = get_dates(config)
     outpaths = defaultdict(lambda: [])
     outpathtemp, tsf = config['out_template']
@@ -54,37 +54,37 @@ def process(config, verbose = False):
     errors = set()
     for outpath, dates in outpaths:
         myioo.clear()
-        status('Starting %s' % outpath)
         if config['no_clobber']:
             if os.path.exists(outpath):
                 status('Already exists, skipping %s ...' % outpath)
                 continue
+        timeit(outpath, True)
         out = make_out(config, dates)
         tflag = out.variables['TFLAG']
         curdate = 0
-        if verbose: timeit('GET_FILES', True)
+        if verbose > 0: timeit('GET_FILES', True)
         get_files = file_getter(config = config, out = out, sources = sources, verbose = verbose).get_files
         for di, date in enumerate(dates):
             file_objs = get_files(date)
             jday = int(date.strftime('%Y%j'))
             itime = int(date.strftime('%H%M%S'))
             tflag[di, :, :] = np.array([[jday, itime]])
-        if verbose: timeit('GET_FILES', False)
+        if verbose > 0: timeit('GET_FILES', False)
         for src, name, expr, outunit in config['mappings']:
-            status('\t'+name)
-            if verbose: timeit('MAP %s' % name, True)
+            if verbose > 1: timeit('MAP %s' % name, True)
             try:
                 grp = get_group(file_objs, src, dates)
                 evalandunit(out, curdate, name, expr, grp.variables, verbose = verbose)
             except Exception, e:
                 errors.add((src, name, expr, str(e)))
                 error("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
-            if verbose: timeit('MAP %s' % name, False)
+            if verbose > 1: timeit('MAP %s' % name, False)
 
         curdate += len(file_objs[0].dimensions['time'])
-        if verbose: timeit('OUTPUT', True)
-        output(out, outpath, config)
-        if verbose: timeit('OUTPUT', False)
+        if verbose > 2: timeit('OUTPUT', True)
+        output(out, outpath, config, verbose = verbose)
+        if verbose > 2: timeit('OUTPUT', False)
+        timeit(outpath, False)
     if len(errors) > 0:
         status('******************')
         status('**** Start Errors:')
@@ -95,9 +95,9 @@ def process(config, verbose = False):
         status('******************')
         status('**** End Errors:')
         status('******************')
-    if verbose: timeit('STARTING', False)
+    if verbose > 1: timeit('PROCESSING', False)
 
-def output(out, outpath, config):
+def output(out, outpath, config, verbose = 0):
     """
     Make final unit conversions, add log information
     and save output to disk
@@ -117,7 +117,7 @@ def output(out, outpath, config):
             tmp[k] = out.variables[k]
     for k, v in config['unitconversions']['metadefs'].iteritems():
         exec('%s = %s' % (k, v), tmp, out.variables)
-    status('Vertical profile Low -> High')
+    if verbose > 0: status('Vertical profile Low -> High')
     np.set_printoptions(precision = 2)
     for vark, varo in out.variables.items():
         if hasattr(varo, 'unitnow'):
@@ -125,15 +125,16 @@ def output(out, outpath, config):
                 expr = config['unitconversions']['%s->%s' % (varo.unitnow.strip(), varo.units.strip())].replace('<value>', 'varo')
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
-                if (varo[:, :] < 0).any():
+                if (varo[:, :] <= 0).any():
                     if config['zero_negs']:
-                        varo[np.where(varo[:] < 0)] = 0.
-                        warn(vark + ' negative values were set to zero', stacklevel = 1)
+                        have_zeros = varo[:] <= 0
+                        varo[np.where(have_zeros)] = 1.e-30
+                        warn(vark + ' %d (of %d; %.2f%%) negative or zero values were set to 1e-30' % (have_zeros.sum(), have_zeros.size, have_zeros.mean() * 100), stacklevel = 1)
                     else:
-                        warn(vark + ' has negative values', stacklevel = 1)
+                        warn(vark + ' has negative or zero values', stacklevel = 1)
             del varo.unitnow
-        if 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
-            status(vark, varo[:, :].mean(0).mean(1))
+        if verbose > 0 and 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
+            status('%s: %s' (vark, str(varo[:, :].mean(0).mean(1))))
     np.set_printoptions(precision = None)
     out.geos2cmaq_warnings = myioo.getwarnings()
     out.geos2cmaq_errors = myioo.geterrors()
@@ -157,7 +158,7 @@ def output(out, outpath, config):
         f.sync()
         f.close()
 
-def evalandunit(out, di, name, expr, variables, verbose = False):
+def evalandunit(out, di, name, expr, variables, verbose = 0):
     """
     Evaluates an expression in the context of a dictionary
     and extracts units from variables used in the evaluation
@@ -350,7 +351,7 @@ def get_group(file_objs, src, dates):
         raise KeyError('No file provided has the %s group' % src)
 
 class file_getter(object):
-    def __init__(self, config, out, sources, verbose = False):
+    def __init__(self, config, out, sources, verbose = 0):
         """
         Initialize a file getting object that caches old files
         for reuse when necessary.
@@ -425,12 +426,12 @@ class file_getter(object):
             lp = self.last_file_paths[fi]
             nf = self.last_file_objs[fi]
             if p != lp:
-                if verbose: timeit('GET_FILE %s' % p, True)
+                if verbose > 0: timeit('GET_FILE %s' % p, True)
 
                 # Close old file to prevent memory leaks
                 nf.close()
                 
-                status('Opening %s with %s' % (p, r), show = False)
+                if verbose > 1: status('Opening %s with %s' % (p, r), show = False)
                 onf = nf = eval(r)(p)
                 
                 if coordstr is None:
@@ -518,7 +519,7 @@ class file_getter(object):
                     else:
                         raise IOError('Unknown type %s; add type to readers' % type(nf))
                 
-                if verbose: timeit('GET_FILE %s' % p, False)
+                if verbose > 0: timeit('GET_FILE %s' % p, False)
 
             self.last_file_objs[fi] = nf
         self.last_file_paths = file_paths
