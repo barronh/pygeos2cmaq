@@ -436,6 +436,8 @@ class file_getter(object):
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
+                        nf.NCOLS = onf.NCOLS
+                        nf.NROWS = onf.NROWS
                 else:
                     # If coordstr is not None, this is a real data
                     # call
@@ -471,8 +473,8 @@ class file_getter(object):
                             # If needs interpolation, first extract unique points
                             # then interpolate, then repeat unique points for
                             # all boundary points
+                            grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
                             if needsvinterp:
-                                grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
                                 # GEOS-Chem files can have multiple layer
                                 # dimensions that share pressure coordinates
                                 # but may have fewer output points
@@ -486,7 +488,7 @@ class file_getter(object):
                             
                             # Extract values that are appropriate
                             # for each boundary grid cell
-                            nf.groups[grpk] = extract(grp, [coordstr])
+                            nf.groups[grpk] = extract(grp, [coordstr], gridded = False)
 
                         for grpk in nonsrcgrps:
                             # Unused groups are explicitly
@@ -500,13 +502,13 @@ class file_getter(object):
                         # If needs interpolation, first extract unique points
                         # then interpolate, then repeat unique points for
                         # all boundary points
+                        nf = extract(nf, [coordstr], unique = True)
                         if needsvinterp:
-                            nf = extract(nf, [coordstr], unique = True)
                             if 'LAY' in nf.dimensions:
                                 nf = interpvars(nf, weights = weights, dimension = 'LAY')
                             else:
                                 nf = interpvars(nf, weights = weights, dimension = 'layer47')
-                        nf = extract(nf, [coordstr])
+                        nf = extract(nf, [coordstr], gridded = False)
                     else:
                         raise IOError('Unknown type %s; add type to readers' % type(nf))
                 
