@@ -134,7 +134,7 @@ def output(out, outpath, config, verbose = 0):
                         warn(vark + ' has negative or zero values', stacklevel = 1)
             del varo.unitnow
         if verbose > 0 and 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
-            status('%s: %s' (vark, str(varo[:, :].mean(0).mean(1))))
+            status('%s: %s' % (vark, str(varo[:, :].mean(0).mean(1))))
     np.set_printoptions(precision = None)
     out.geos2cmaq_warnings = myioo.getwarnings()
     out.geos2cmaq_errors = myioo.geterrors()
