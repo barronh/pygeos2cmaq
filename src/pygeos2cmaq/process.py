@@ -125,14 +125,15 @@ def output(out, outpath, config, verbose = 0):
                 expr = config['unitconversions']['%s->%s' % (varo.unitnow.strip(), varo.units.strip())].replace('<value>', 'varo')
                 exec('varo[:] = %s' % expr, dict(varo = varo), out.variables)
                 varo.history += ';' + expr.replace('varo', 'RESULT')
-                if (varo[:, :] <= 0).any():
-                    if config['zero_negs']:
-                        have_zeros = varo[:] <= 0
-                        varo[np.where(have_zeros)] = 1.e-30
-                        warn(vark + ' %d (of %d; %.2f%%) negative or zero values were set to 1e-30' % (have_zeros.sum(), have_zeros.size, have_zeros.mean() * 100), stacklevel = 1)
-                    else:
-                        warn(vark + ' has negative or zero values', stacklevel = 1)
             del varo.unitnow
+
+        if vark not in ('time', 'TFLAG') and 'latitude' not in vark and 'longitude' not in vark and (varo[...] <= 0).any():
+            if config['zero_negs']:
+                have_zeros = varo[...] <= 0
+                varo[np.where(have_zeros)] = 1.e-30
+                warn(vark + ' %d (of %d; %.2f%%) negative or zero values were set to 1e-30' % (have_zeros.sum(), have_zeros.size, have_zeros.mean() * 100), stacklevel = 1)
+            else:
+                warn(vark + ' has negative or zero values', stacklevel = 1)
         if verbose > 0 and 'TSTEP' in varo.dimensions and 'PERIM' in varo.dimensions:
             status('%s: %s' % (vark, str(varo[:, :].mean(0).mean(1))))
     np.set_printoptions(precision = None)
@@ -256,7 +257,6 @@ def make_out(config, dates):
     get_files = file_getter(config = config, out = None, sources = None).get_files
     file_objs = get_files(dates[0])
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
-    geosf = [f for f in file_objs if 'tau0' in f.variables.keys()][0]
     outnames = OrderedDict()
     for src, name, expr, unit in config['mappings']:
         if not [src, name, expr, unit] == ['SOURCE', 'MECHSPC', 'GEOS_EXPRESSION', 'UNIT']:
@@ -282,19 +282,21 @@ def make_out(config, dates):
     mlon = metf.variables['longitude']
     out.createVariable('longitude', 'f', ('PERIM',), units = mlon.units, values = mlon[:])
     coordstr = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon, mlat)])
-    
-    geosf = extract(geosf, [coordstr])
-    glatb = geosf.variables['latitude_bounds']
-    out.createVariable('geos_latitude_bounds', 'f', ('PERIM', 'nv'), units = glatb.units, values = glatb[:])
+    geosfs = [f for f in file_objs if 'tau0' in f.variables.keys()]
+    if len(geosfs) > 0:
+        geosf = geosfs[0]
+        geosf = extract(geosf, [coordstr])
+        glatb = geosf.variables['latitude_bounds']
+        out.createVariable('geos_latitude_bounds', 'f', ('PERIM', 'nv'), units = glatb.units, values = glatb[:])
 
-    glonb = geosf.variables['longitude_bounds']
-    out.createVariable('geos_longitude_bounds', 'f', ('PERIM', 'nv'), units = glonb.units, values = glonb[:])
+        glonb = geosf.variables['longitude_bounds']
+        out.createVariable('geos_longitude_bounds', 'f', ('PERIM', 'nv'), units = glonb.units, values = glonb[:])
 
-    glat = geosf.variables['latitude']
-    out.createVariable('geos_latitude', 'f', ('PERIM',), units = glat.units, values = glat[:])
+        glat = geosf.variables['latitude']
+        out.createVariable('geos_latitude', 'f', ('PERIM',), units = glat.units, values = glat[:])
 
-    glon = geosf.variables['longitude']
-    out.createVariable('geos_longitude', 'f', ('PERIM',), units = glon.units, values = glon[:])
+        glon = geosf.variables['longitude']
+        out.createVariable('geos_longitude', 'f', ('PERIM',), units = glon.units, values = glon[:])
 
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
     var.long_name = 'TFLAG'.ljust(16);
