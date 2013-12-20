@@ -53,6 +53,7 @@ def process(config, verbose = False):
     outpaths.sort()
     errors = set()
     for outpath, dates in outpaths:
+        myioo.clear()
         status('Starting %s' % outpath)
         if config['no_clobber']:
             if os.path.exists(outpath):

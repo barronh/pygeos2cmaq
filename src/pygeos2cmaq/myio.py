@@ -9,6 +9,9 @@ warnings.formatwarning = formatwarning
 
 class myio(object):
     def __init__(self):
+        self.clear()
+    
+    def clear(self):
         self._warnings = ""
         self._errors = ""
         self._status = ""
