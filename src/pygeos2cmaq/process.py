@@ -80,7 +80,8 @@ def process(config, verbose = 0):
                 error("Unable to map %s to %s in %s: %s" % (name, expr, src, str(e)), stacklevel = 1)
             if verbose > 1: timeit('MAP %s' % name, False)
 
-        curdate += len(file_objs[0].dimensions['time'])
+        if config['time_incr'].total_seconds() > 0:
+            curdate += len(file_objs[0].dimensions['time'])
         if verbose > 2: timeit('OUTPUT', True)
         output(out, outpath, config, verbose = verbose)
         if verbose > 2: timeit('OUTPUT', False)
@@ -155,7 +156,7 @@ def output(out, outpath, config, verbose = 0):
     f.close()
     if config['repair_aero']:
         f = Dataset(outpath, 'r+')
-        repair_ae(f)
+        repair_ae(f, myioo)
         f.sync()
         f.close()
 
@@ -539,6 +540,8 @@ def get_dates(config):
     time_incr = config['time_incr']
     alldates = []
     date = config['start_date']
+    if time_incr.total_seconds() == 0:
+        return [date]
     
     while date <= end_date:
         alldates.append(date)
