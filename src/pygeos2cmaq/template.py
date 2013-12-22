@@ -10,7 +10,7 @@ time_incr: 1 hours
 
 # Output files are stored in files matching
 # the out_template
-out_template: ['geos2cmaq.%%Y%%m%%d.nc', minus1hour]
+out_template: ['testdata/geos2cmaq.%%Y%%m%%d.nc', minus1hour]
 
 # Do not over-write (clobber) outputs
 no_clobber: False
@@ -51,7 +51,7 @@ unitconversions:
     molec/cm3->ppmV: <value> * CM3PERMMOLEC
     metadefs:
         AIRMOLPERM3: 1e6 * AIRDEN / 6.022E+23
-        CM3PERMMOLEC: 1e6 /  AIRDEN
+        CM3PMNMOLEC: 1e6 /  AIRDEN
 # When AIRDEN is unavailable, use PRES and TA from METBDY
 # requires hourly PRES and TA
 #       AIRMOLPERM3: PRES / (8.314 * TA)
@@ -60,6 +60,7 @@ unitconversions:
 # Mappings provide algebraic processing of GEOS-Chem
 # variables to make CMAQ variables, with unit processing
 # as described above.
+#  - ['SOURCE', 'MECHSPC', 'GEOS_EXPRESSION', 'UNIT']
 mappings:
 %s
 
