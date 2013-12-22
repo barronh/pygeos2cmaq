@@ -2,7 +2,7 @@ import sys
 import pylab as pl
 import numpy as np
 from warnings import warn
-from netCDF4 import MFDataset
+from netCDF4 import MFDataset, Dataset
 from collections import defaultdict
 from datetime import datetime, timedelta
 from glob import glob
@@ -138,7 +138,11 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
-    f = MFDataset(paths)
+    if len(paths) == 1:
+        f = Dataset(paths[0])
+    else:
+        f = MFDataset(paths)
+
     try:
         if sigma:
             vertcrd = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
@@ -216,18 +220,24 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
             ax.set_xlim(vmin, vmax)
             #if scale == 'log':
             #    ax.set_xticklabels(['%.1f' % (10**x) for x in ax.get_xticks()])
-            try:
+            
+            if 'TFLAG' in f.variables.keys():
                 SDATE = f.variables['TFLAG'][:][0, 0, 0]
                 EDATE = f.variables['TFLAG'][:][-1, 0, 0]
                 STIME = f.variables['TFLAG'][:][0, 0, 1]
                 ETIME = f.variables['TFLAG'][:][-1, 0, 1]
-                sdate = datetime.strptime('%d %06d' % (SDATE, STIME), '%Y%j %H%M%S')
-                edate = datetime.strptime('%d %06d' % (EDATE, ETIME), '%Y%j %H%M%S')
-            
-            except Exception, e:
-                print str(e)
+                if SDATE == 0:
+                    SDATE = 1900001
+                    EDATE = 1900001
+                sdate = datetime.strptime('%07d %06d' % (SDATE, STIME), '%Y%j %H%M%S')
+                edate = datetime.strptime('%07d %06d' % (EDATE, ETIME), '%Y%j %H%M%S')
+            elif 'tau0' in f.variables.keys():
                 sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
                 edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+            else:
+                sdate = datetime(1900, 1, 1, 0)
+                edate = datetime(1900, 1, 1, 0)
+
             if len(tespaths) > 0:
                 tesl, tesr = plot_tes(ax, lonbs, latbs, tespaths)
                 if not tesl is None:
