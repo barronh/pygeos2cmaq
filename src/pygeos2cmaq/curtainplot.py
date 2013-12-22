@@ -2,7 +2,7 @@ import sys
 import pylab as pl
 import numpy as np
 from warnings import warn
-from netCDF4 import MFDataset
+from netCDF4 import MFDataset, Dataset
 from datetime import datetime, timedelta
 
 
@@ -65,7 +65,10 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
     from pylab import figure, NullFormatter, close, rcParams
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
-    f = MFDataset(paths)
+    if len(paths) == 1:
+        f = Dataset(paths[0])
+    else:
+        f = MFDataset(paths)
     try:
         if sigma:
             vertcrd = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
@@ -156,7 +159,6 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
             end_west = start_west + y
             X, Y = np.meshgrid(np.arange(x) * f.XCELL * xyfactor, vertcrd)
             patchess = axs.pcolor(X, Y, var[:, start_south:end_south], cmap = bmap, vmin = vmin, vmax = vmax, norm = norm)
-            import pdb; pdb.set_trace()
             if not map:
                 if reversevert: axs.set_ylim(*axs.get_ylim()[::-1])
                 axs.set_title('South')
@@ -199,20 +201,30 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
             else:
                 for ax in [axe, axn, axw, axs] + ([axmap] if map else []):
                     ax.axis('tight')
-
-            try:
-                sdate = datetime.strptime('%d %06d' % (f.SDATE, f.STIME), '%Y%j %H%M%S')
-                edate = datetime.strptime('%d %06d' % (f.EDATE, f.ETIME), '%Y%j %H%M%S')
-            except:
+            
+            if 'TFLAG' in f.variables.keys():
+                SDATE = f.variables['TFLAG'][:][0, 0, 0]
+                EDATE = f.variables['TFLAG'][:][-1, 0, 0]
+                STIME = f.variables['TFLAG'][:][0, 0, 1]
+                ETIME = f.variables['TFLAG'][:][-1, 0, 1]
+                if SDATE == 0:
+                    SDATE = 1900001
+                    EDATE = 1900001
+                sdate = datetime.strptime('%07d %06d' % (SDATE, STIME), '%Y%j %H%M%S')
+                edate = datetime.strptime('%07d %06d' % (EDATE, ETIME), '%Y%j %H%M%S')
+            elif 'tau0' in f.variables.keys():
                 sdate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau0'][0])
                 edate = datetime(1985, 1, 1, 0) + timedelta(hours = f.variables['tau1'][-1])
+            else:
+                sdate = datetime(1900, 1, 1, 0)
+                edate = datetime(1900, 1, 1, 0)
             try:
                 title = '%s %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
             except:
                 title = var_name
             fig.suptitle(title)
             fig.colorbar(patchesw, cax = cax, boundaries = bins)
-            fig.savefig('%s_%s_%s.pdf' % (prefix, var_name, func))
+            fig.savefig('%s_%s_%s.png' % (prefix, var_name, func))
             pl.close(fig)
     
 if __name__ == '__main__':
