@@ -1,4 +1,4 @@
-__all__ = 'Dataset NetCDFFile ioapi bpch cspec profile'.split()
+__all__ = 'Dataset NetCDFFile ioapi bpch cspec profile ijavgnc'.split()
 
 from netCDF4 import Dataset
 NetCDFFile = Dataset
@@ -10,6 +10,16 @@ class ioapi(PseudoNetCDFFile):
     def __init__(self, path):
         outf = getvarpnc(NetCDFFile(path), None)
         add_cf_from_ioapi(outf)
+        self.groups = dict(METBDY3D = outf)
+        self.variables = outf.variables
+        self.dimensions = outf.dimensions
+        for k in outf.ncattrs():
+            setattr(self, k, getattr(outf, k))
+
+class ijavgnc(PseudoNetCDFFile):
+    def __init__(self, path):
+        outf = getvarpnc(NetCDFFile(path), None)
+        self.groups = {'IJ-AVG-$': outf}
         self.variables = outf.variables
         self.dimensions = outf.dimensions
         for k in outf.ncattrs():
