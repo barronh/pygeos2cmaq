@@ -21,7 +21,7 @@ def run():
         from template import template
         if options.configuration is None:
             warn("Using default mechanism: %s" % defaultmech)
-            options.template = defaultmech
+            options.configuration = defaultmech
         else:
             if os.path.exists(options.configuration):
                 pass
