@@ -143,6 +143,12 @@ def plot(paths, keys = ['O3'], prefix = 'BC', scale = 'log', minmax = (None, Non
     else:
         f = MFDataset(paths)
 
+    # Add CF conventions if necessary
+    if 'latitude_bounds' not in f.variables.keys():
+        from PseudoNetCDF import getvarpnc
+        from PseudoNetCDF.conventions.ioapi import add_cf_from_ioapi
+        f = getvarpnc(f, None)
+        add_cf_from_ioapi(f)
     try:
         if sigma:
             vertcrd = f.VGLVLS[:-1] + np.diff(f.VGLVLS)
