@@ -60,7 +60,11 @@ unitconversions:
 # Mappings provide algebraic processing of GEOS-Chem
 # variables to make CMAQ variables, with unit processing
 # as described above.
+# A line looks like:
 #  - ['SOURCE', 'MECHSPC', 'GEOS_EXPRESSION', 'UNIT']
+# where:
+#  - SOURCE is a GEOS-Chem group (e.g., IJ-AVG-$, IJ-CHK-$, etc)
+#    or PROFILE for profile or METBDY3D for the meteorology file
 mappings:
 %s
 
