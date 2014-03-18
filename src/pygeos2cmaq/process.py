@@ -194,7 +194,6 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
     
     # Evaluate the expression to create output data
     outval = eval(expr, None, variables)
-    
     # Store present unit and add a history to the output variable
     unitnow = origunits
     outvar.history = expr
@@ -210,7 +209,7 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
             outvar.history += '; RESULT * %s' % metavar.kgpermole
             
             # Update present unit to reflect multiplication
-            unitnow = ('kg/mol*%s' % origunits).replace('kg/mol*ppbC', 'micrograms/mol').replace('kg/mol*ppbv', 'micrograms/mol')
+            unitnow = ('kg/mol*%s' % origunits)
         
         elif origunits in ('ppbC',):
             # For units of ppbC, divide by carbon and update unit
@@ -223,7 +222,7 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
     
     # Store output variable in outvar starting at last
     # output
-    outvar[di:di + outvar.shape[0]] += outval.squeeze()
+    outvar[di:di + outval.shape[0]] += outval.squeeze()
 
     # Update variables original unit
     # to help in final unit conversion
@@ -331,23 +330,26 @@ def get_group(file_objs, src, dates):
                 grp = f.groups[src]
                 if 'TFLAG' in grp.variables.keys():
                     tflag = grp.variables['TFLAG']
-                    thisdate = [date.strptime('%d %06d' % (d, t), '%Y%j %H%M%S') for d, t in tflag[:, 0]]
+                    thisdate = [datetime.strptime('%d %06d' % (d, t), '%Y%j %H%M%S') for d, t in tflag[:, 0]]
+                    tname = 'TSTEP'
                 elif 'time' in grp.variables.keys():
                     time = grp.variables['time']
                     unit, starttxt = grp.variables['time'].units.split(' since ')
                     starttxt = starttxt.replace('UTC', '').strip()
                     start_date = datetime.strptime(starttxt, '%Y-%m-%d %H:%M:%S')
                     thisdate = [start_date + timedelta(**{unit: t}) for t in time[:]]
+                    tname = 'time'
                 elif 'tau0' in grp.variables.keys():
                     time = grp.variables['tau0']
                     unit, starttxt = time.units.split(' since ')
                     start_date = datetime.strptime(start_date)
                     thisdate = [start_date + timedelta(**{unit: t}) for t in time]
+                    tname = 'time'
                 else:
                     return grp
                 thisdate = np.array(thisdate)
                 idx, = np.where(np.logical_and(thisdate >= dates[0], thisdate <= dates[-1]))
-                grpt = slice_dim(grp, 'time,%d,%d' % (idx[0], idx[-1] + 1))
+                grpt = slice_dim(grp, '%s,%d,%d' % (tname, idx[0], idx[-1] + 1))
                 return grpt
                 
     else:
@@ -569,7 +571,9 @@ def get_vert_in(nf, pref, vgtop):
     from sigma coordinates in a netcdf-like
     file
     """
-    if 'sigma-mid' in nf.variables.keys():
+    if hasattr(nf, 'VGLVLS'):
+        vert_in = pres_from_sigma(nf.VGLVLS, pref, vgtop, avg = True)
+    elif 'sigma-mid' in nf.variables.keys():
         sigma = np.array(nf.variables['sigma-mid'])
         # assuming VGTOP of model is consistent with
         # VGTOP of profile
