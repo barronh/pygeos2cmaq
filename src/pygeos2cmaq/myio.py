@@ -1,7 +1,7 @@
 __all__ = ['myio']
 import warnings
 
-def formatwarning(message, category, filename, lineno, line = 0):
+def formatwarning(message, category, filename = 'unknown', lineno = -1, line = 0, stacklevel = 0):
     strout = "\n***********\n%s:%s: %s:\n\t%s\n***********\n" % (filename, lineno, category.__name__, message)
     return strout
 
@@ -15,6 +15,7 @@ class myio(object):
         self._warnings = ""
         self._errors = ""
         self._status = ""
+
     def warn(self, *args, **kwds):
         keep = kwds.pop('keep', True)
         if 'message' in kwds:
@@ -23,12 +24,12 @@ class myio(object):
             message = args[0]
         if keep:
             self._warnings += '\n' + message
-        warnings.warn(*args, **kwds)
+        warnings.warn(message)
     
     def status(self, *args, **kwds):
         show = kwds.get('show', True)
         if 'message' in kwds:
-            message = kwds['message']
+            message = kwds.pop('message')
         else:
             message = args[0]
         self._status += '\n' + message
@@ -36,11 +37,11 @@ class myio(object):
 
     def error(self, *args, **kwds):
         if 'message' in kwds:
-            message = kwds['message']
+            message = kwds.pop('message')
         else:
             message = args[0]
         self._errors += '\n' + message
-        self.warn(message, keep = False)
+        self.warn(message)
     
     def getwarnings(self):
         return self._warnings

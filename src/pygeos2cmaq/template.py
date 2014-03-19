@@ -48,6 +48,7 @@ file_templates:
 unitconversions:
     ppbv->ppmV: <value>/1000.
     micrograms/mol->micrograms/m**3: <value> * AIRMOLPERM3
+    kg/mol*ppbv->micrograms/m**3: <value> * AIRMOLPERM3
     molec/cm3->ppmV: <value> * CM3PERMMOLEC
     metadefs:
         AIRMOLPERM3: 1e6 * AIRDEN / 6.022E+23
