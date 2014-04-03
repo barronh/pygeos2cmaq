@@ -121,7 +121,7 @@ def repair_ae(f, myioo):
     bcspcs = getbcspecies()
     for spc in bcspcs:
         try:
-            ntimes, nlayers, nperim = f.variables[spc.name].shape
+            data_shape = f.variables[spc.name].shape
             break
         except:
             pass
@@ -144,7 +144,7 @@ def repair_ae(f, myioo):
     
     if len(version_check) > 1:
         warn('Some variables from aerosol versions %s were not found' % ' and '.join([str(v) for v in version_check]))
-    moment3 = dict([(k, zeros((ntimes, nlayers, nperim), dtype = 'f')) for k in 'ATKN ACC COR'.split()])
+    moment3 = dict([(k, zeros(data_shape, dtype = 'f')) for k in 'ATKN ACC COR'.split()])
     
     for spc in bcspcs:
         try:

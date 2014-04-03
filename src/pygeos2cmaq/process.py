@@ -9,7 +9,7 @@ from numpy import *
 from readers import *
 from timeformatters import *
 from fast_interp import get_interp_w
-from PseudoNetCDF import PseudoNetCDFFile, interpvars
+from PseudoNetCDF import PseudoNetCDFFile, interpvars, Pseudo2NetCDF
 
 from myio import myio
 myioo = myio()
@@ -191,9 +191,9 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
     # units 
     outvar = out.variables[name]
     outunit = outvar.units.strip()
-    
     # Evaluate the expression to create output data
-    outval = eval(expr, None, variables)
+    outval = eval(expr, None, variables).reshape(*(-1,) + outvar[:].shape[1:])
+    
     # Store present unit and add a history to the output variable
     unitnow = origunits
     outvar.history = expr
@@ -222,7 +222,8 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
     
     # Store output variable in outvar starting at last
     # output
-    outvar[di:di + outval.shape[0]] += outval.squeeze()
+    ts = outval.shape[0]
+    outvar[di:di + ts] += outval[:outvar.shape[0] - di].squeeze()
 
     # Update variables original unit
     # to help in final unit conversion
@@ -267,36 +268,52 @@ def make_out(config, dates):
     out.createDimension('DATE-TIME', len(metf.dimensions['DATE-TIME']))
     out.createDimension('LAY', len(metf.dimensions['LAY']))
     out.createDimension('VAR', len(outnames))
-    out.createDimension('PERIM', len(metf.dimensions['PERIM']))
-    out.createDimension('nv', len(metf.dimensions['nv']))
-
     mlatb = metf.variables['latitude_bounds']
-    out.createVariable('latitude_bounds', 'f', ('PERIM', 'nv'), units = mlatb.units, values = mlatb[:])
-
     mlonb = metf.variables['longitude_bounds']
-    out.createVariable('longitude_bounds', 'f', ('PERIM', 'nv'), units = mlonb.units, values = mlonb[:])
+    if metf.FTYPE == 2:
+        out.createDimension('PERIM', len(metf.dimensions['PERIM']))
+        out.createDimension('nv', len(metf.dimensions['nv']))
+        vardims = ('TSTEP', 'LAY', 'PERIM')
+        coordbounddims = ('PERIM', 'nv')
+        coorddims = ('PERIM',)
+        out.FTYPE = 2 # Boundary http://www.baronams.com/products/ioapi/TUTORIAL.html
+    elif metf.FTYPE == 1:
+        out.createDimension('ROW', metf.NROWS)
+        out.createDimension('COL', metf.NCOLS)
+        out.createDimension('nv', len(metf.dimensions['nv']))
+        vardims = ('TSTEP', 'LAY', 'ROW', 'COL')
+        coordbounddims = ('ROW', 'COL', 'nv')
+        coorddims = ('ROW', 'COL')
+        out.FTYPE = 1 # Gridded http://www.baronams.com/products/ioapi/TUTORIAL.html
+    else:
+        raise ValueError('extract_type must be icon or bcon; got %s' % extract_type)
+        
+
+    out.createVariable('latitude_bounds', 'f', coordbounddims, units = mlatb.units, values = mlatb[:])
+
+    out.createVariable('longitude_bounds', 'f', coordbounddims, units = mlonb.units, values = mlonb[:])
 
     mlat = metf.variables['latitude']
-    out.createVariable('latitude', 'f', ('PERIM',), units = mlat.units, values = mlat[:])
+    out.createVariable('latitude', 'f', coorddims, units = mlat.units, values = mlat[:])
 
     mlon = metf.variables['longitude']
-    out.createVariable('longitude', 'f', ('PERIM',), units = mlon.units, values = mlon[:])
-    coordstr = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon, mlat)])
+    out.createVariable('longitude', 'f', coorddims, units = mlon.units, values = mlon[:])
+    coordstr = '/'.join(['%s,%s' % (o, a) for o, a in zip(mlon[:].ravel(), mlat[:].ravel())])
     geosfs = [f for f in file_objs if 'tau0' in f.variables.keys()]
     if len(geosfs) > 0:
         geosf = geosfs[0]
         geosf = extract(geosf, [coordstr])
         glatb = geosf.variables['latitude_bounds']
-        out.createVariable('geos_latitude_bounds', 'f', ('PERIM', 'nv'), units = glatb.units, values = glatb[:])
+        out.createVariable('geos_latitude_bounds', 'f', coordbounddims, units = glatb.units, values = glatb[:, [0, 0, 1, 1]].reshape(mlatb[:].shape))
 
         glonb = geosf.variables['longitude_bounds']
-        out.createVariable('geos_longitude_bounds', 'f', ('PERIM', 'nv'), units = glonb.units, values = glonb[:])
+        out.createVariable('geos_longitude_bounds', 'f', coordbounddims, units = glonb.units, values = glonb[:, [0, 1, 1, 0]].reshape(mlonb[:].shape))
 
         glat = geosf.variables['latitude']
-        out.createVariable('geos_latitude', 'f', ('PERIM',), units = glat.units, values = glat[:])
+        out.createVariable('geos_latitude', 'f', coorddims, units = glat.units, values = glat[:].reshape(mlat[:].shape))
 
         glon = geosf.variables['longitude']
-        out.createVariable('geos_longitude', 'f', ('PERIM',), units = glon.units, values = glon[:])
+        out.createVariable('geos_longitude', 'f', coorddims, units = glon.units, values = glon[:].reshape(mlon[:].shape))
 
     var = out.createVariable('TFLAG', 'i', ('TSTEP', 'VAR', 'DATE-TIME'))
     var.long_name = 'TFLAG'.ljust(16);
@@ -312,7 +329,7 @@ def make_out(config, dates):
     setattr(out, 'ETIME', int(dates[-1].strftime('%H%M%S')))
     
     for src, name, expr, outunit in config['mappings']:
-        var = out.createVariable(name, 'f', ('TSTEP', 'LAY', 'PERIM'))
+        var = out.createVariable(name, 'f', vardims)
         var.long_name = name.ljust(16);
         var.var_desc = name.ljust(80);
         var.units = outunit.ljust(16)
@@ -345,6 +362,13 @@ def get_group(file_objs, src, dates):
                     start_date = datetime.strptime(start_date)
                     thisdate = [start_date + timedelta(**{unit: t}) for t in time]
                     tname = 'time'
+                elif isinstance(f, (icon_profile, bcon_profile, profile_to_bdy, profile_to_grid)):
+                    if len(dates) > 1:
+                        for k in grp.variables.keys():
+                            v = grp.variables[k]
+                            if v.shape[0] == 1:
+                                grp.variables[k] = v.repeat(len(dates), 0)
+                    return grp
                 else:
                     return grp
                 thisdate = np.array(thisdate)
@@ -395,7 +419,7 @@ class file_getter(object):
         """
     
         from PseudoNetCDF.sci_var import extract, slice_dim, getvarpnc
-        from PseudoNetCDF.cmaqfiles.profile import profile
+        from PseudoNetCDF.cmaqfiles.profile import bcon_profile, icon_profile
         import gc
         
         # make quick references to instance variables
@@ -445,7 +469,7 @@ class file_getter(object):
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split())
-                    if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, profile):
+                    if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, bcon_profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
                         nf.NCOLS = onf.NCOLS
@@ -463,14 +487,14 @@ class file_getter(object):
                     needsvinterp = not np.all([vert_out == vert_in])
                     weights = get_interp_w(vert_in, vert_out)
                     
-                    if isinstance(nf, profile):
+                    if isinstance(nf, (bcon_profile, icon_profile)):
                         if needsvinterp:
                             nf = interpvars(nf, weights, dimension = 'sigma-mid')
                         metf = [f for f in self.last_file_objs if 'PERIM' in f.dimensions][0]
                         ## profile files need to be converted
                         ## to METBDY coordinates by repeating
                         ## boundaries
-                        nf = profile_to_bdy(nf, ncols = metf.NCOLS, nrows = metf.NROWS)
+                        nf = profile_to_ftype(nf, ncols = metf.NCOLS, nrows = metf.NROWS, ftype = metf.FTYPE)
                     elif isinstance(nf, bpch):
                         ## Only extract groups that are used
                         ## in mappings, and only extract variables
@@ -507,20 +531,21 @@ class file_getter(object):
                             # removed
                             del nf.groups[grpk]
                         
-                    elif isinstance(nf, (Dataset, NetCDFFile, ioapi, PseudoNetCDFFile)):
+                    elif isinstance(nf, (Dataset, NetCDFFile, METBDY3D, METCRO3D, PseudoNetCDFFile)):
                         ## Dataset and NetCDFFile could have groups,
                         ## but that is not treated at this time.
                         
                         # If needs interpolation, first extract unique points
                         # then interpolate, then repeat unique points for
                         # all boundary points
-                        nf = extract(nf, [coordstr], unique = True)
-                        if needsvinterp:
-                            if 'LAY' in nf.dimensions:
-                                nf = interpvars(nf, weights = weights, dimension = 'LAY')
-                            else:
-                                nf = interpvars(nf, weights = weights, dimension = 'layer47')
-                        nf = extract(nf, [coordstr], gridded = False)
+                        if not isinstance(nf, (METBDY3D, METCRO3D)):
+                            nf = extract(nf, [coordstr], unique = True)
+                            if needsvinterp:
+                                if 'LAY' in nf.dimensions:
+                                    nf = interpvars(nf, weights = weights, dimension = 'LAY')
+                                else:
+                                    nf = interpvars(nf, weights = weights, dimension = 'layer47')
+                            nf = extract(nf, [coordstr], gridded = False)
                     else:
                         raise IOError('Unknown type %s; add type to readers' % type(nf))
                 
@@ -584,17 +609,64 @@ def get_vert_in(nf, pref, vgtop):
         raise KeyError('No sigma-mid or layer in %s' % str(nf.variables.keys()))
     return vert_in
 
-def profile_to_bdy(nf, ncols, nrows):
-    """
-    nf - profile file (netcdf-like)
-    ncols - number of columns
-    nrows - number of rows
-    """
-    nf.createDimension('PERIM', (ncols + nrows + 2) * 2)
-    for k, v in nf.variables.items():
-        if k in ('sigma', 'sigma-mid'): continue
-        nv = np.concatenate([v[:, [0]].repeat(ncols + 1, 1), v[:, [1]].repeat(nrows + 1, 1), v[:, [2]].repeat(ncols + 1, 1), v[:, [3]].repeat(nrows + 1, 1)], axis = 1)
-        vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
-        nf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'PERIM'), values = nv[None,:], kgpermole = 1., **vard)
-    nf.groups = dict(PROFILE = nf)
-    return nf
+def profile_to_ftype(nf, ncols, nrows, ftype):
+    if ftype == 2:
+        return profile_to_bdy(nf, ncols, nrows)
+    elif ftype == 1:
+        return profile_to_grid(nf, ncols, nrows)
+    else:
+        raise ValueError('ftype must be 2 (BNDY) or 1 (CRO3D); got %d' % ftype)
+
+class profile_to_bdy(PseudoNetCDFFile):
+    def __init__(self, nf, ncols, nrows):
+        """
+        nf - profile file (netcdf-like)
+        ncols - number of columns
+        nrows - number of rows
+        """
+        outf = self
+        p2n = Pseudo2NetCDF()
+        p2n.addGlobalProperties(nf, outf)
+        outf.createDimension('sigma-mid', len(nf.dimensions['sigma-mid']))
+        outf.createDimension('TSTEP', 1)
+        outf.createDimension('PERIM', (ncols + nrows + 2) * 2)
+        for k, v in nf.variables.items():
+            if k in ('sigma', 'sigma-mid'): continue
+            nv = np.concatenate([v[:, [0]].repeat(ncols + 1, 1), v[:, [1]].repeat(nrows + 1, 1), v[:, [2]].repeat(ncols + 1, 1), v[:, [3]].repeat(nrows + 1, 1)], axis = 1)
+            vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
+            outf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'PERIM'), values = nv[None,:], kgpermole = 1., **vard)
+        outf.groups = dict(PROFILE = outf)
+
+class profile_to_grid(PseudoNetCDFFile):
+    def __init__(self, nf, ncols, nrows):
+        """
+        nf - profile file (netcdf-like)
+        ncols - number of columns
+        nrows - number of rows
+        """
+    
+        outf = self
+        p2n = Pseudo2NetCDF()
+        p2n.addGlobalProperties(nf, outf)
+        outf.createDimension('sigma-mid', len(nf.dimensions['sigma-mid']))
+        outf.createDimension('ROW', nrows)
+        outf.createDimension('COL', ncols)
+        outf.createDimension('TSTEP', 1)
+    
+        j, i = np.indices([nrows, ncols])
+        north_fraction = j.astype('d') / j.max()
+        south_fraction = 1 - north_fraction
+        east_fraction = i.astype('d') / i.max()
+        west_fraction = 1 - east_fraction
+        outval = np.zeros((1, len(nf.dimensions['sigma-mid']), nrows, ncols), dtype = 'f')
+        for k, v in nf.variables.items():
+            if k in ('sigma', 'sigma-mid'): continue
+            vard = dict([(pk, getattr(v, pk)) for pk in v.ncattrs()])
+            # If this is an icon file
+            if v.ndim == 2 and v.shape[1] == 1:
+                v = v.repeat(4, 1)[:, :, None, None]
+            else:
+                v = v[:, :, None, None]
+            outval[0, :] = (north_fraction * v[:, 2] + south_fraction * v[:, 0] + west_fraction * v[:, 3] + east_fraction * v[:, 1]) / 2
+            outf.createVariable(k, v.dtype.char, ('time', 'sigma-mid', 'ROW', 'COL'), values = outval.astype(v.dtype), kgpermole = 1., **vard)
+        outf.groups = dict(PROFILE = outf)
