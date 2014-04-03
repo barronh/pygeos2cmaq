@@ -160,7 +160,9 @@ def repair_ae(f, myioo):
         if numkey in f.variables.keys():
             numvar = f.variables[numkey]
         else:
-            numvar = f.createVariable(numkey, 'f', ('TSTEP', 'LAY', 'PERIM'))
+            bcspc = [spc.name for spc in bcspcs if spc.found][0]
+            dims = f.variables[bcspc].dimensions
+            numvar = f.createVariable(numkey, 'f', dims)
             numvar.units = '#/m**3'.ljust(16);
             numvar.long_name = numkey.ljust(16);
             numvar.var_desc = numkey.ljust(16);
@@ -168,7 +170,9 @@ def repair_ae(f, myioo):
         if srfkey in f.variables.keys():
             srfvar = f.variables[srfkey]
         else:
-            srfvar = f.createVariable(srfkey, 'f', ('TSTEP', 'LAY', 'PERIM'))
+            bcspc = [spc.name for spc in bcspcs if spc.found][0]
+            dims = f.variables[bcspc].dimensions
+            srfvar = f.createVariable(srfkey, 'f', dims)
             srfvar.units = 'm**2/m**3'.ljust(16);
             srfvar.long_name = srfkey.ljust(16);
             srfvar.var_desc = srfkey.ljust(16);
