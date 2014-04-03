@@ -24,13 +24,14 @@ repair_aero: True
 # then the file will be read using an interpreter.
 #
 # [interpreter, pathtemplate, function]
-# - interpreter is a file reading function (e.g., NetCDFFile, ioapi, bpch, cspec)
+# - interpreter is a file reading function (e.g., NetCDFFile, METBDY3D, METCRO3D, bpch, cspec,
+#   bcon_profile, icon_profile)
 # - pathtemplate will be processed by a strftime like function to create a path
 # - function is a function that uses strftime and the current date to process the path template
 file_templates:
   - [bpch, 'testdata/ts%%Y%%m%%d.bpch', minus1hour]
-  - [ioapi, 'testdata/METBDY3D_100101', simpledate]
-  - [profile, 'testdata/profile.dat', simpledate]
+  - [METBDY3D, 'testdata/METBDY3D_100101', simpledate]
+  - [bcon_profile, 'testdata/profile.dat', simpledate]
 
 
 # GEOS-Chem species will automatically convert from
