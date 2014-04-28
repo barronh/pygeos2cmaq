@@ -327,7 +327,6 @@ def make_out(config, dates):
     setattr(out, 'STIME', int(dates[0].strftime('%H%M%S')))
     setattr(out, 'EDATE', int(dates[-1].strftime('%Y%j')))
     setattr(out, 'ETIME', int(dates[-1].strftime('%H%M%S')))
-    
     for src, name, expr, outunit in config['mappings']:
         var = out.createVariable(name, 'f', vardims)
         var.long_name = name.ljust(16);
@@ -407,7 +406,7 @@ class file_getter(object):
             self.vert_out = None
         else:
             self._pref = 101325.
-            self.vert_out = pres_from_sigma(out.VGLVLS, self._pref, out.VGTOP, avg = True)
+            self.vert_out = get_vert_in(out, pref = self._pref, vgtop = out.VGTOP, calcgeospress = config['interpolation']['calcgeospress'])
 
     def get_files(self, date):
         """
@@ -486,7 +485,14 @@ class file_getter(object):
 
                     needsvinterp = not np.all([vert_out == vert_in])
                     weights = get_interp_w(vert_in, vert_out)
-                    
+                    if not self._config['interpolation']['extrapolate']:
+                        for nli in range(weights.shape[0]):
+                            if weights[nli, 0] > 1 and weights[nli, 1] < 0:
+                                weights[nli, 0] = 1
+                                weights[nli, 1] = 0
+                            if weights[nli, -1] > 1 and weights[nli, -2] < 0:
+                                weights[nli, -1] = 1
+                                weights[nli, -2] = 0
                     if isinstance(nf, (bcon_profile, icon_profile)):
                         if needsvinterp:
                             nf = interpvars(nf, weights, dimension = 'sigma-mid')
@@ -520,7 +526,7 @@ class file_getter(object):
                                 for dimk in grp.dimensions:
                                     if dimk[:5] == 'layer':
                                         nlays = len(grp.dimensions[dimk])
-                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = dimk)
+                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = dimk, loginterp = (grp.variables.keys() if self._config['interpolation']['log'] else []))
                             
                             # Extract values that are appropriate
                             # for each boundary grid cell
@@ -590,12 +596,17 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
     
-def get_vert_in(nf, pref, vgtop):
+def get_vert_in(nf, pref, vgtop, calcgeospress = False):
     """
     Calculates a pressure coordinate
     from sigma coordinates in a netcdf-like
     file
     """
+    #if hasattr(nf, 'IOAPI_VERSION'):
+    #    if 'PRES' in nf.variables.keys():
+    #        vert_in = nf.variables['PRES'][:]
+    #    elif hasattr(nf, 'VGLVLS'):
+    #        vert_in = pres_from_sigma(nf.VGLVLS, pref, vgtop, avg = True)
     if hasattr(nf, 'VGLVLS'):
         vert_in = pres_from_sigma(nf.VGLVLS, pref, vgtop, avg = True)
     elif 'sigma-mid' in nf.variables.keys():
@@ -603,8 +614,32 @@ def get_vert_in(nf, pref, vgtop):
         # assuming VGTOP of model is consistent with
         # VGTOP of profile
         vert_in = pres_from_sigma(sigma, pref, vgtop)
+    elif calcgeospress:
+        if 'PEDGE-\$_PSURF' in nf.variables.keys():
+            vert_in = nf.variables['PEDGE-\$_PSURF'][:].mean(0).mean(1).mean(1)
+        elif 'TIME-SER_AIRDEN' in nf.variables.keys() and 'DAO-3D-$_TMPU' in nf.variables.keys():
+            warn('Calculating pressure from Air Density and Temperature')
+            airden = nf.variables['TIME-SER_AIRDEN'][:] * 1e6
+            temperature = nf.variables['DAO-3D-$_TMPU'][:]
+            from scipy.constants import Avogadro, R
+            vert_in = (airden / Avogadro * temperature * R).mean(0).mean(1).mean(1)
+        else:
+            raise ValueError('Could not find geos pressure; disable calculation of pressure.')
     elif 'layer' in nf.variables.keys():
-        vert_in = nf.variables['layer'] * 100.
+        warn('Using pressure from website')
+        if 'PEDGE-\$_PSURF' in nf.variables.keys():
+            warn('Pressure is available; enable calcgeospress to utilize.')
+        elif 'TIME-SER_AIRDEN' in nf.variables.keys() and 'DAO-3D-$_TMPU' in nf.variables.keys():
+            warn('AIRDEN and TMPU are available; enable calcgeospress to utilize.')
+        layerv = nf.variables['layer']
+        punit = layerv.units.strip()
+        if punit in ('millibar', 'hPa'):
+            vert_in = layerv[:] * 100.
+        elif punit == 'Pa':
+            vert_in = layerv[:]
+        else:
+            raise ValueError('Not sure how to process unit %s; need millibar, hPa or Pa' % punit)
+            
     else:
         raise KeyError('No sigma-mid or layer in %s' % str(nf.variables.keys()))
     return vert_in
