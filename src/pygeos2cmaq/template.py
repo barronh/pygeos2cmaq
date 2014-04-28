@@ -4,13 +4,13 @@ template_string = """# Start and End date, inclusive, will be output
 #
 # start_date and end_date in the form YYYY-MM-DD HH:MM:SS
 # time_incr in the form val units (units must be plural, e.g., hours, seconds)
-start_date: '2010-01-01 01:00:00'
-end_date:   '2010-01-03 00:00:00'
+start_date: '2010-01-01 00:00:00'
+end_date:   '2010-01-03 23:00:00'
 time_incr: 1 hours
 
 # Output files are stored in files matching
 # the out_template
-out_template: ['testdata/geos2cmaq.%%Y%%m%%d.nc', minus1hour]
+out_template: ['testdata/geos2cmaq.%%Y%%m%%d.nc', simpledate]
 
 # Do not over-write (clobber) outputs
 no_clobber: False
@@ -29,7 +29,7 @@ repair_aero: True
 # - pathtemplate will be processed by a strftime like function to create a path
 # - function is a function that uses strftime and the current date to process the path template
 file_templates:
-  - [bpch, 'testdata/ts%%Y%%m%%d.bpch', minus1hour]
+  - [bpch, 'testdata/ts%%Y%%m%%d.bpch', simpledate]
   - [METBDY3D, 'testdata/METBDY3D_100101', simpledate]
   - [bcon_profile, 'testdata/profile.dat', simpledate]
 
@@ -70,6 +70,10 @@ unitconversions:
 mappings:
 %s
 
+interpolation:
+    extrapolate: False
+    log: True
+    calcgeospress: True
 """
 
 def template(config = 'mapping/cb05cl_ae6_aq.csv'):
