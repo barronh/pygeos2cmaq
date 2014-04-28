@@ -20,3 +20,10 @@ BC.TEST.20060801:
 	unzip pygeos2cmaq_test.zip
 
 geos2cmaq.icon.20060801.check.nc geos2cmaq.bcon.20060801.check.nc METBDY3D_Benchmark_TP METCRO3D_Benchmark_TP: BC.TEST.20060801
+
+clean:
+	rm -rf geos2cmaq.icon.20060801.nc geos2cmaq.bcon.20060801.nc *.png *.png.nc
+
+distclean:
+	make clean
+	rm -rf geos2cmaq.icon.20060801.check.nc geos2cmaq.bcon.20060801.check.nc METBDY3D_Benchmark_TP METCRO3D_Benchmark_TP BC.TEST.20060801 pygeos2cmaq_test.zip
