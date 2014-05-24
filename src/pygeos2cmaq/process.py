@@ -9,7 +9,8 @@ from numpy import *
 from readers import *
 from timeformatters import *
 from fast_interp import get_interp_w
-from PseudoNetCDF import PseudoNetCDFFile, interpvars, Pseudo2NetCDF
+from PseudoNetCDF import PseudoNetCDFFile, interpvars, Pseudo2NetCDF, PseudoNetCDFVariable
+from PseudoNetCDF.core import convolve_dim
 
 from myio import myio
 myioo = myio()
@@ -37,6 +38,7 @@ def process(config, verbose = 0):
         3. does unit conversion
     
     """
+    import numpy as np
     if verbose > 1: timeit('PROCESSING', True)
     alldates = get_dates(config)
     outpaths = defaultdict(lambda: [])
@@ -44,11 +46,10 @@ def process(config, verbose = 0):
     for date in alldates:
         outpaths[eval(tsf)(date, outpathtemp)].append(date)
     sources = defaultdict(lambda: set('time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split()))
+    
     for src, name, expr, unit in config['mappings']:
-        tmp = defaultdict(lambda: 1, np = np)
-        eval(expr, None, tmp)
-        tmp.pop('np')
-        sources[src].update(set(tmp.keys()))
+        co = compile(expr, 'src', 'eval')
+        sources[src].update(set([k_ for k_ in co.co_names if k_ not in ('np',)]))
     outpaths = [(k, v) for k, v in outpaths.iteritems()]
     outpaths.sort()
     errors = set()
@@ -81,7 +82,10 @@ def process(config, verbose = 0):
             if verbose > 1: timeit('MAP %s' % name, False)
 
         if config['time_incr'].total_seconds() > 0:
-            curdate += len(file_objs[0].dimensions['time'])
+            try:
+                curdate += len(file_objs[0].dimensions['time'])
+            except:
+                curdate += len(file_objs[0].dimensions['TSTEP'])
         if verbose > 2: timeit('OUTPUT', True)
         output(out, outpath, config, verbose = verbose)
         if verbose > 2: timeit('OUTPUT', False)
@@ -173,16 +177,14 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
     
     # Evaluate the expression to generate keys
     # used in the expression
-    eval(expr, None, tmpdict)
+    co = compile(expr, expr, 'eval')
 
-    # Remove numpy from generated keys
-    tmpdict.pop('np')
-    
     # Get first key to pull meta data
-    key = tmpdict.keys()[0]
-    
-    # Get a variable to pull meta data
-    metavar = variables[key]
+    for k in co.co_names:
+        if k in variables:
+            # Get a variable to pull meta data
+            metavar = variables[k]
+            break
     
     # Get the original units from the meta variable
     origunits = metavar.units.strip()
@@ -425,7 +427,8 @@ class file_getter(object):
         sources = self._sources
         verbose = self._verbose
         coordstr = self._coordstr
-        vert_out = self.vert_out
+        met_vert_out = vert_out = self.vert_out
+        met_vaxis = vaxis = 0
         
         # Fill file path templates with date using the time
         # function provided
@@ -484,15 +487,10 @@ class file_getter(object):
                     vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP)
 
                     needsvinterp = not np.all([vert_out == vert_in])
-                    weights = get_interp_w(vert_in, vert_out)
+                    weights = get_interp_w(vert_in, vert_out, axis = vaxis)
                     if not self._config['interpolation']['extrapolate']:
-                        for nli in range(weights.shape[0]):
-                            if weights[nli, 0] > 1 and weights[nli, 1] < 0:
-                                weights[nli, 0] = 1
-                                weights[nli, 1] = 0
-                            if weights[nli, -1] > 1 and weights[nli, -2] < 0:
-                                weights[nli, -1] = 1
-                                weights[nli, -2] = 0
+                        weights = np.ma.min([weights, np.ones_like(weights)], axis = 0)
+                        weights = np.ma.max([weights, np.zeros_like(weights)], axis = 0)
                     if isinstance(nf, (bcon_profile, icon_profile)):
                         if needsvinterp:
                             nf = interpvars(nf, weights, dimension = 'sigma-mid')
@@ -508,6 +506,17 @@ class file_getter(object):
                         grpkeys = set(nf.groups.keys())
                         srcgrps = set(sources.keys()).intersection(grpkeys)
                         nonsrcgrps = grpkeys.difference(sources)
+                        if needsvinterp and self._config['interpolation']['calcgeospress']:
+                            vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP, calcgeospress = self._config['interpolation']['calcgeospress'])
+                            tmpnf = getvarpnc(nf, vert_in.dimensions)
+                            var = tmpnf.createVariable('PRES', vert_in.dtype.char, vert_in.dimensions)
+                            var[:] = vert_in
+                            tmpnf = extract(tmpnf, [coordstr], unique = False)
+                            vert_in = tmpnf.variables['PRES']
+                            weights = get_interp_w(vert_in, met_vert_out, axis = met_vaxis)
+                            if not self._config['interpolation']['extrapolate']:
+                                weights = np.ma.min([weights, np.ones_like(weights)], axis = 0)
+                                weights = np.ma.max([weights, np.zeros_like(weights)], axis = 0)
                         for grpk in srcgrps:
                             grp = nf.groups[grpk]
                             grp = nf.groups[grpk] = getvarpnc(grp, sources[grpk])
@@ -515,7 +524,10 @@ class file_getter(object):
                             # If needs interpolation, first extract unique points
                             # then interpolate, then repeat unique points for
                             # all boundary points
-                            grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
+                            if self._config['interpolation']['calcgeospress']:
+                                grp = nf.groups[grpk] = extract(grp, [coordstr])
+                            else:
+                                grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
                             if needsvinterp:
                                 # GEOS-Chem files can have multiple layer
                                 # dimensions that share pressure coordinates
@@ -526,11 +538,12 @@ class file_getter(object):
                                 for dimk in grp.dimensions:
                                     if dimk[:5] == 'layer':
                                         nlays = len(grp.dimensions[dimk])
-                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights[:, :nlays], dimension = dimk, loginterp = (grp.variables.keys() if self._config['interpolation']['log'] else []))
+                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights.take(range(nlays), met_vaxis + 1), dimension = dimk, loginterp = (grp.variables.keys() if self._config['interpolation']['log'] else []))
                             
                             # Extract values that are appropriate
                             # for each boundary grid cell
-                            nf.groups[grpk] = extract(grp, [coordstr], gridded = False)
+                            if not self._config['interpolation']['calcgeospress']:
+                                nf.groups[grpk] = extract(grp, [coordstr], gridded = False)
 
                         for grpk in nonsrcgrps:
                             # Unused groups are explicitly
@@ -544,7 +557,12 @@ class file_getter(object):
                         # If needs interpolation, first extract unique points
                         # then interpolate, then repeat unique points for
                         # all boundary points
-                        if not isinstance(nf, (METBDY3D, METCRO3D)):
+                        if isinstance(nf, (METBDY3D, METCRO3D)):
+                            tmpnf = getvarpnc(nf, ['PRES'])
+                            tmpnf = convolve_dim(tmpnf, 'TSTEP,valid,0.5,0.5')
+                            self.met_vert_out = met_vert_out = tmpnf.variables['PRES'][:]
+                            met_vaxis = list(tmpnf.variables['PRES'].dimensions).index('LAY')
+                        else:
                             nf = extract(nf, [coordstr], unique = True)
                             if needsvinterp:
                                 if 'LAY' in nf.dimensions:
@@ -616,13 +634,13 @@ def get_vert_in(nf, pref, vgtop, calcgeospress = False):
         vert_in = pres_from_sigma(sigma, pref, vgtop)
     elif calcgeospress:
         if 'PEDGE-\$_PSURF' in nf.variables.keys():
-            vert_in = nf.variables['PEDGE-\$_PSURF'][:].mean(0).mean(1).mean(1)
+            vert_in = nf.variables['PEDGE-\$_PSURF'][:]
         elif 'TIME-SER_AIRDEN' in nf.variables.keys() and 'DAO-3D-$_TMPU' in nf.variables.keys():
             warn('Calculating pressure from Air Density and Temperature')
             airden = nf.variables['TIME-SER_AIRDEN'][:] * 1e6
             temperature = nf.variables['DAO-3D-$_TMPU'][:]
             from scipy.constants import Avogadro, R
-            vert_in = (airden / Avogadro * temperature * R).mean(0).mean(1).mean(1)
+            vert_in = (airden / Avogadro * temperature * R)
         else:
             raise ValueError('Could not find geos pressure; disable calculation of pressure.')
     elif 'layer' in nf.variables.keys():
@@ -637,6 +655,9 @@ def get_vert_in(nf, pref, vgtop, calcgeospress = False):
             vert_in = layerv[:] * 100.
         elif punit == 'Pa':
             vert_in = layerv[:]
+        elif punit == 'model layer':
+            warn('Interpreting bpch model layer unit as hPa; deprecated and improved in updated PseudoNetCDF.')
+            vert_in = layerv[:] * 100.
         else:
             raise ValueError('Not sure how to process unit %s; need millibar, hPa or Pa' % punit)
             
