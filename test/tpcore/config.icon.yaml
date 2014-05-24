@@ -72,8 +72,8 @@ mappings:
   - ['IJ-AVG-$', 'ASO4K', '0.0776 * SALC', 'micrograms/m**3']
   - ['IJ-AVG-$', 'ASO4K', '0.02655 * DST2', 'micrograms/m**3']
   - ['PROFILE', 'FACD', 'FACD', 'ppmV']
-  - ['PROFILE', 'ETH', 'ETH', 'ppmV']
 
 interpolation:
     extrapolate: True
     log: False
+    calcgeospress: False
