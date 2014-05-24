@@ -1,7 +1,10 @@
 import numpy as np
 
-def get_interp_w(x, xn):
-    dx = np.ma.diff(x)
+def get_interp_w(x, xn, axis = 0):
+    """
+    Returns array of weighting variables with shape (xn.shape, x.shape)
+    """
+    dx = np.ma.diff(x, axis = axis)
     if (dx > 0).all():
         reverse = False
     elif (dx < 0).all():
@@ -9,42 +12,70 @@ def get_interp_w(x, xn):
     else:
         raise TypeError('Must be either ascending or descending')
     if reverse:
-        x = x[::-1]
-        xn = xn[::-1]    
-    dx = np.ma.diff(x)
-    dx = np.ma.concatenate([dx, [max(xn.max(), x.max() + dx[-1])]])
-        
-    pct_dx = (xn[:, None] - x[None, :]) / dx[None, :]
+        idx = tuple([slice(None)] * axis + [slice(None, None, -1)])
+        x = x[idx]
+        xn = xn[idx]    
+    dx = np.ma.diff(x, axis = axis)
+    xtmp = np.ma.concatenate([x, np.max([xn.max(axis = axis, keepdims = True), x.max(axis = axis, keepdims = True) + dx.take([-1], axis = axis)], axis = 0)], axis = axis)
+    dx = np.ma.diff(xtmp, axis = axis)
+    
+    xnshape = range(xn.ndim)
+    xshape = range(x.ndim)
+    xnshape.insert(axis + 1, -1)
+    xshape.insert(axis, -1)
+    dimiter = np.nditer([xn, x, dx, None], flags=['external_loop'], op_axes=[xnshape, xshape, xshape, None])
+    for xn_, x_, dx_, pct_dx_ in dimiter:
+        pct_dx_[...] = (xn_ - x_) / dx_
+    pct_dx = dimiter.operands[3]
+    #pct_dx = (xn[:, None] - x[None, :]) / dx[None, :]
     test = np.ma.logical_and(pct_dx < 1, pct_dx >= 0)
     #test[:, 1:] = np.ma.logical_or(test[:, 1:], test[:, :-1])
     mask = False == test
     w = np.ma.masked_where(mask, pct_dx)
     w = 1 - w
-    w[:, 1:] = np.ma.array([w[:, 1:], 1 - w[:, :-1]], dtype = w.dtype).max(0)
-    nmax = xn.max()
-    omax = x[-1]
-    if nmax > omax:
+    idxs = tuple([slice(None)] * (axis + 1) + [slice(1, None)])
+    idxe = tuple([slice(None)] * (axis + 1) + [slice(None, -1)])
+    
+    w[idxs] = np.ma.array([w[idxs], 1 - w[idxe]], dtype = w.dtype).max(0)
+    nmax = xn.max(axis = axis, keepdims = True)
+    omax = x.max(axis = axis, keepdims = True)
+    if np.any(nmax > omax):
         # Needs special case extrapolation code
-        for i in np.ma.where(xn >= x.max())[0]:
-            w[i, -1] = pct_dx[i, -2]
-            w[i, -2] = 1 - w[i, -1]
+        idx = np.ma.where(xn >= x.max(axis = axis, keepdims = True))
+        for thisidx in zip(*idx):
+            idxs = list(thisidx)
+            idxs.insert(axis + 1, -1)
+            idxs = tuple(idxs)
+            idxe = list(thisidx)
+            idxe.insert(axis + 1, -2)
+            idxe = tuple(idxe)
+            w[idxs] = pct_dx[idxe]
+            w[idxe] = 1 - w[idxs]
         
     
-    nmin = xn.min()
-    omin = x[0]
-    if nmin < omin:
+    nmin = xn.min(axis = axis, keepdims = True)
+    omin = x.min(axis = axis, keepdims = True)
+    if np.any(nmin < omin):
         # Needs special case extrapolation code
-        for i in np.ma.where(xn <= x.min())[0]:
-            w[i, 0] = 1 - pct_dx[i, 0]
-            w[i, 1] = 1 - w[i, 0]
+        idx = np.ma.where(xn <= x.min(axis = axis, keepdims = True))
+        for thisidx in zip(*idx):
+            idxs = list(thisidx)
+            idxs.insert(axis + 1, 0)
+            idxs = tuple(idxs)
+            idxe = list(thisidx)
+            idxe.insert(axis + 1, 1)
+            idxe = tuple(idxe)
+            w[idxs] = 1 - pct_dx[idxs]
+            w[idxe] = 1 - w[idxs]
     try:
-        np.testing.assert_allclose(w.sum(1).filled(1), 1, rtol=1e-6)
+        np.testing.assert_allclose(w.sum(axis + 1).filled(1), 1, rtol=1e-6)
     except:
-        print w.sum(1); print w
+        print w.sum(axis + 1); print w
         raise
         
     if reverse:
-        w = w[::-1, ::-1]
+        idx = tuple([slice(None)] * axis + [slice(None, None, -1), slice(None, None, -1)])
+        w = w[idx]
     return w
 
 if __name__ == '__main__':
@@ -134,6 +165,38 @@ if __name__ == '__main__':
     w = get_interp_w(sin, sout)
     yhat2 = (w * cin[None, :]).sum(1)
 
-    np.testing.assert_allclose(yhat1, cout, rtol=1e-07, atol=0, err_msg='', verbose=True)
-    np.testing.assert_allclose(yhat1, yhat2, rtol=1e-07, atol=0, err_msg='', verbose=True)
+    np.testing.assert_allclose(yhat1, cout, rtol=1e-07, atol=0, err_msg='All values should be exact as they were produced from this function and archived', verbose=True)
+    np.testing.assert_allclose(yhat1[5:-2], yhat2[5:-2], rtol=1e-07, atol=0, err_msg='Within inputs, all values should be close', verbose=True)
+    np.testing.assert_array_less(yhat1[:5], yhat2[:5], err_msg = 'Expecting extrapolation to cause higher values')
+    np.testing.assert_array_less(yhat2[-2:], yhat1[-2:], err_msg = 'Expecting extrapolation to cause lower values')
     
+    from scipy.interpolate import LinearNDInterpolator
+    
+    sin = np.array([[ 1 ,  0.955,  0.885,  0.72 ,  0.45 ,  0 ],
+                    [ 1 ,  0.95,  0.89,  0.7 ,  0.48 ,  0 ]])
+    cin = np.array([[  4.00000000e-03,   3.25700000e-03,   1.88300000e-03,
+         7.02300000e-04,   3.17700000e-05,   3.97000000e-08],
+                    [  4.00000000e-03,   3.25700000e-03,   1.88300000e-03,
+         7.02300000e-04,   3.17700000e-05,   3.97000000e-08]])
+    cout = np.array([[3.96697820e-03, 3.93395542e-03, 3.90093362e-03, 3.86791084e-03, 
+      3.83488905e-03, 3.80186627e-03, 3.76884447e-03, 3.63675531e-03, 
+      3.45513346e-03, 3.25699967e-03, 2.98219970e-03, 2.66814309e-03, 
+      2.31482867e-03, 1.90262813e-03, 1.72557316e-03, 1.53952373e-03, 
+      1.32485078e-03, 1.08871083e-03, 8.16792131e-04, 6.35247046e-04, 
+      5.13558207e-04, 3.76968745e-04, 2.20511835e-04, 4.66706673e-05, 
+      2.65521275e-05, 2.01355564e-05, 1.29433552e-05, 4.55245399e-06, 
+      3.97000000e-08],
+     [3.97028038e-03, 3.94055988e-03, 3.91084026e-03, 3.88111976e-03, 
+      3.85140014e-03, 3.82167964e-03, 3.79196002e-03, 3.67307978e-03, 
+      3.50962011e-03, 3.33129975e-03, 3.05089965e-03, 2.68450027e-03, 
+      2.27230012e-03, 1.85814302e-03, 1.71521616e-03, 1.55364692e-03, 
+      1.36722041e-03, 1.16215151e-03, 9.26011588e-04, 6.80965011e-04, 
+      5.31619617e-04, 3.63987096e-04, 1.71971797e-04, 3.01834850e-05, 
+      2.48951008e-05, 1.88795654e-05, 1.21368768e-05, 4.27040687e-06, 
+      3.97000000e-08]])
+    yhat1 =  np.array([np.interp(sout[::-1], sin[0, ::-1], cin[0, ::-1])[::-1],
+                       np.interp(sout[::-1], sin[1, ::-1], cin[1, ::-1])[::-1]])
+    w = get_interp_w(sin, sout[None, :].repeat(2, 0), axis = 1)
+    yhat2 = (w * cin[:, None, :]).sum(2)
+    np.testing.assert_allclose(yhat1, cout, rtol=1e-07, atol=0, err_msg='All values should be exact as they were produced from this function and archived', verbose=True)
+    np.testing.assert_allclose(yhat1[:], yhat2[:], rtol=1e-07, atol=0, err_msg='Within inputs, all values should be close', verbose=True)
