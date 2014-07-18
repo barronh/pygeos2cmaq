@@ -643,13 +643,13 @@ def get_vert_in(nf, pref, vgtop, calcgeospress = False):
             vert_in = (airden / Avogadro * temperature * R)
         else:
             raise ValueError('Could not find geos pressure; disable calculation of pressure.')
-    elif 'layer' in nf.variables.keys():
+    elif 'etam_pressure' in nf.variables.keys():
         warn('Using pressure from website')
         if 'PEDGE-\$_PSURF' in nf.variables.keys():
             warn('Pressure is available; enable calcgeospress to utilize.')
         elif 'TIME-SER_AIRDEN' in nf.variables.keys() and 'DAO-3D-$_TMPU' in nf.variables.keys():
             warn('AIRDEN and TMPU are available; enable calcgeospress to utilize.')
-        layerv = nf.variables['layer']
+        layerv = nf.variables['etam_pressure']
         punit = layerv.units.strip()
         if punit in ('millibar', 'hPa'):
             vert_in = layerv[:] * 100.
