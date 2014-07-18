@@ -48,9 +48,34 @@ Install Instructions
   2. Install following "Get Pip" instructions at http://www.pip-installer.org/en/latest/installing.html
   3. Open a Terminal
   4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip"
-5. Ubuntu Linux
+3. Ubuntu Linux
   1. Open Terminal
   2. sudo apt-get install python-scipy
   3. sudo apt-get install python-pip
   4. sudo pip install http://cheeseshop.python.org/packages/source/p/pyparsing/pyparsing-1.5.5.tar.gz
   5. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip"
+4. Linux without Permissions
+  1. Navigate in terminal to the folder you want to install/work in.
+  2. type `curl -kLO http://repo.continuum.io/miniconda/Miniconda-3.5.5-Linux-x86_64.sh`
+    1. path may change in the future
+  3. type `bash Miniconda-3.5.5-Linux-x86_64.sh`
+    1. confirm prompts as necessary until you get to the install path (at the time of this writing: hit enter; hit space; type yes; hit enter;)
+    2. Choose `./miniconda` as the install path
+    3. Decide whether or not all future sessions should use this python
+      1. Choose yes to enable this miniconda for all future sessions;
+      2. Choose no to require miniconda to be enabled as needed;
+  4. Enable miniconda (this step is required for at least this session): `export PATH=${PWD}/miniconda/bin:${PATH}`
+  5. Install packages (type code in each step and confirm prompts)
+    1. `conda install numpy`
+    2. `conda install scipy`
+    3. `conda install matplotlib`
+    4. `conda install basemap`
+    5. `conda install netcdf4`
+    6. `conda install pip`
+    7. `pip install --no-deps --upgrade --install-option="--prefix=${PWD}/miniconda/" git+https://code.google.com/p/pseudonetcdf/`
+    8. `pip install --no-deps --upgrade --install-option="--prefix=${PWD}/miniconda/" https://github.com/barronh/pygeos2cmaq/archive/master.zip`
+  6. You're ready to go!
+  
+
+
+
