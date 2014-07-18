@@ -106,6 +106,7 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
             norm = BoundaryNorm(bins, ncolors = 256)
             if map:
                 fig = pl.figure(figsize = (8, 8))
+                fig.subplots_adjust(hspace = .3, wspace = .3)
                 axmap = fig.add_subplot(3,3,5)
                 try:
                     cmaqmap = domainfromcmaq(f)
@@ -138,12 +139,16 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 xyfactor = 1
             else:
                 fig = pl.figure(figsize = (16, 4))
+                fig.subplots_adjust(bottom=0.15)
                 axw = fig.add_subplot(1,4,1)
                 axn = fig.add_subplot(1,4,2)
                 axe = fig.add_subplot(1,4,3)
                 axs = fig.add_subplot(1,4,4)
                 cax = fig.add_axes([.91, .1, .025, .8])
-                axw.set_ylabel('sigma')
+                if sigma:
+                    axw.set_ylabel('sigma')
+                else:
+                    axw.set_ylabel('pressure')
             
                 xyfactor = 1e-3 # m -> km
                      
@@ -222,8 +227,9 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
                 title = '%s %s to %s' % (var_name, sdate.strftime('%Y-%m-%d'), edate.strftime('%Y-%m-%d'))
             except:
                 title = var_name
-            fig.suptitle(title)
+            fig.suptitle(title.replace('O3', 'Ozone at Regional Boundaries'))
             fig.colorbar(patchesw, cax = cax, boundaries = bins)
+            cax.set_xlabel('ppm')
             fig.savefig('%s_%s_%s.png' % (prefix, var_name, func))
             pl.close(fig)
     
