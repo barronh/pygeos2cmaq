@@ -42,15 +42,15 @@ Install Instructions
 1. Windows
   1. Install python-xy using Windows executable
   2. Open DOS command prompt (start run -> type "cmd" -> hit enter
-  3. type "pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
+  3. type "pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip"
 2. Mac OSX
   1. Install the Anaconda Python Distribution
   2. Install following "Get Pip" instructions at http://www.pip-installer.org/en/latest/installing.html
   3. Open a Terminal
-  4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
+  4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip"
 5. Ubuntu Linux
   1. Open Terminal
   2. sudo apt-get install python-scipy
   3. sudo apt-get install python-pip
-  3. sudo pip install http://cheeseshop.python.org/packages/source/p/pyparsing/pyparsing-1.5.5.tar.gz
-  4. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip
+  4. sudo pip install http://cheeseshop.python.org/packages/source/p/pyparsing/pyparsing-1.5.5.tar.gz
+  5. type "sudo pip install https://github.com/barronh/pygeos2cmaq/archive/master.zip"
