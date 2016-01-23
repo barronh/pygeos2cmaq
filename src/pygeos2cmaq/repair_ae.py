@@ -115,9 +115,12 @@ def getbcspecies():
     return bcspecies
 
 def repair_ae(f, myioo):
-    warn = myioo.warn
-    status = myioo.status
-    error = myioo.error
+    if myioo is None:
+        status = warn = error = warnings.warn
+    else:
+        warn = myioo.warn
+        status = myioo.status
+        error = myioo.error
     bcspcs = getbcspecies()
     for spc in bcspcs:
         try:
@@ -182,5 +185,6 @@ def repair_ae(f, myioo):
 
 if __name__ == '__main__':
     f = Dataset(sys.argv[1], mode = 'r+')
-    repair_ae(f)
+    from warnings import warn
+    repair_ae(f, None)
     

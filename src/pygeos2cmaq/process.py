@@ -60,7 +60,7 @@ def process(config, verbose = 0):
                 status('Already exists, skipping %s ...' % outpath)
                 continue
         timeit(outpath, True)
-        out = make_out(config, dates)
+        out = make_out(config, dates, verbose = verbose)
         tflag = out.variables['TFLAG']
         curdate = 0
         if verbose > 0: timeit('GET_FILES', True)
@@ -240,7 +240,7 @@ def evalandunit(out, di, name, expr, variables, verbose = 0):
 
     return outval, origunits
     
-def make_out(config, dates):
+def make_out(config, dates, verbose = 0):
     """
     Make an output file with appropriate dimensions and variables
 
@@ -257,7 +257,7 @@ def make_out(config, dates):
     out.variables = OrderedDict()
 
     # Get files for the first date
-    get_files = file_getter(config = config, out = None, sources = None).get_files
+    get_files = file_getter(config = config, out = None, sources = None, verbose = verbose).get_files
     file_objs = get_files(dates[0])
     metf = [f for f in file_objs if 'PERIM' in f.dimensions][0]
     outnames = OrderedDict()
@@ -289,7 +289,13 @@ def make_out(config, dates):
         out.FTYPE = 1 # Gridded http://www.baronams.com/products/ioapi/TUTORIAL.html
     else:
         raise ValueError('extract_type must be icon or bcon; got %s' % extract_type)
-        
+    
+    if config['interpolation']['calcgeospress']:
+        mpres = metf.variables['PRES']
+        pres = out.createVariable('PRES', 'f', vardims)
+        for k in mpres.ncattrs():
+            setattr(pres, k, getattr(mpres, k))
+        pres[:] = mpres[1:]
 
     out.createVariable('latitude_bounds', 'f', coordbounddims, units = mlatb.units, values = mlatb[:])
 
@@ -407,9 +413,20 @@ class file_getter(object):
         if out is None:
             self.vert_out = None
         else:
-            self._pref = 101325.
-            self.vert_out = get_vert_in(out, pref = self._pref, vgtop = out.VGTOP, calcgeospress = config['interpolation']['calcgeospress'])
-
+            self.set_vert_out()
+    def set_vert_out(self):
+        outf = self._out
+        ntimes = len(outf.dimensions['TSTEP'])
+        nlays = len(outf.dimensions['LAY'])
+        if 'PERIM' in outf.dimensions:
+            nperim = len(outf.dimensions['PERIM'])
+            shape = [ntimes, nlays, nperim]
+        else:
+            nrows = len(outf.dimensions['ROW'])
+            ncols = len(outf.dimensions['COL'])
+            shape = [ntimes, nlays, nrows, ncols]
+        self.vert_out = getsigmafromvglvls(outf, shape = shape, layeraxis = 1)
+        
     def get_files(self, date):
         """
         Put date into file_templates and return open files,
@@ -420,15 +437,13 @@ class file_getter(object):
         """
     
         from PseudoNetCDF.sci_var import extract, slice_dim, getvarpnc
-        from PseudoNetCDF.cmaqfiles.profile import bcon_profile, icon_profile
+        #from PseudoNetCDF.cmaqfiles.profile import bcon_profile, icon_profile
         import gc
         
         # make quick references to instance variables
         sources = self._sources
         verbose = self._verbose
         coordstr = self._coordstr
-        met_vert_out = vert_out = self.vert_out
-        met_vaxis = vaxis = 0
         
         # Fill file path templates with date using the time
         # function provided
@@ -452,6 +467,8 @@ class file_getter(object):
         # For each file, use the reader (r) to open the
         # path (p)
         for fi, (r, p) in enumerate(file_paths):
+            print fi, r, p, eval(r)
+            import pdb; pdb.set_trace()
             # If last path is this path
             # no need to update
             lp = self.last_file_paths[fi]
@@ -470,7 +487,8 @@ class file_getter(object):
                     # meta-data
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
-                        nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds'.split())
+                        nf = getvarpnc(onf, 'time TFLAG tau0 tau1 latitude longitude latitude_bounds longitude_bounds PRES'.split())
+                        nf = onf
                     if 'PERIM' in onf.dimensions.keys() and not isinstance(onf, bcon_profile):
                         nf.createDimension('PERIM', len(onf.dimensions['PERIM']))
                         nf.createDimension('LAY', len(onf.dimensions['LAY']))
@@ -481,95 +499,27 @@ class file_getter(object):
                     # call
                     #
                     # Real data calls require vertical interpolation
-                    
                     ## Calculate the vertical coordinate of
                     ## the input file
-                    vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP)
-
-                    needsvinterp = not np.all([vert_out == vert_in])
-                    weights = get_interp_w(vert_in, vert_out, axis = vaxis)
-                    if not self._config['interpolation']['extrapolate']:
-                        weights = np.ma.min([weights, np.ones_like(weights)], axis = 0)
-                        weights = np.ma.max([weights, np.zeros_like(weights)], axis = 0)
+                    # BCON and ICON file processing
                     if isinstance(nf, (bcon_profile, icon_profile)):
-                        if needsvinterp:
-                            nf = interpvars(nf, weights, dimension = 'sigma-mid')
+                        nf = nf.interptosigma(self.vert_out, sources)
                         metf = [f for f in self.last_file_objs if 'PERIM' in f.dimensions][0]
                         ## profile files need to be converted
                         ## to METBDY coordinates by repeating
                         ## boundaries
                         nf = profile_to_ftype(nf, ncols = metf.NCOLS, nrows = metf.NROWS, ftype = metf.FTYPE)
-                    elif isinstance(nf, bpch):
+                    # GEOS-Chem BPCH processing (TPCORE, ND49 BPCH or ND49)
+                    elif isinstance(nf, (bpch, ND49NC)):
                         ## Only extract groups that are used
                         ## in mappings, and only extract variables
                         ## in those groups that are used
-                        grpkeys = set(nf.groups.keys())
-                        srcgrps = set(sources.keys()).intersection(grpkeys)
-                        nonsrcgrps = grpkeys.difference(sources)
-                        if needsvinterp and self._config['interpolation']['calcgeospress']:
-                            vert_in = get_vert_in(nf, pref = self._pref, vgtop = self._out.VGTOP, calcgeospress = self._config['interpolation']['calcgeospress'])
-                            tmpnf = getvarpnc(nf, vert_in.dimensions)
-                            var = tmpnf.createVariable('PRES', vert_in.dtype.char, vert_in.dimensions)
-                            var[:] = vert_in
-                            tmpnf = extract(tmpnf, [coordstr], unique = False)
-                            vert_in = tmpnf.variables['PRES']
-                            weights = get_interp_w(vert_in, met_vert_out, axis = met_vaxis)
-                            if not self._config['interpolation']['extrapolate']:
-                                weights = np.ma.min([weights, np.ones_like(weights)], axis = 0)
-                                weights = np.ma.max([weights, np.zeros_like(weights)], axis = 0)
-                        for grpk in srcgrps:
-                            grp = nf.groups[grpk]
-                            grp = nf.groups[grpk] = getvarpnc(grp, sources[grpk])
-                            
-                            # If needs interpolation, first extract unique points
-                            # then interpolate, then repeat unique points for
-                            # all boundary points
-                            if self._config['interpolation']['calcgeospress']:
-                                grp = nf.groups[grpk] = extract(grp, [coordstr])
-                            else:
-                                grp = nf.groups[grpk] = extract(grp, [coordstr], unique = True)
-                            if needsvinterp:
-                                # GEOS-Chem files can have multiple layer
-                                # dimensions that share pressure coordinates
-                                # but may have fewer output points
-                                #
-                                # for each dimensions, interpolation must 
-                                # be done separately
-                                for dimk in grp.dimensions:
-                                    if dimk[:5] == 'layer':
-                                        nlays = len(grp.dimensions[dimk])
-                                        grp = nf.groups[grpk] = interpvars(grp, weights = weights.take(range(nlays), met_vaxis + 1), dimension = dimk, loginterp = (grp.variables.keys() if self._config['interpolation']['log'] else []))
-                            
-                            # Extract values that are appropriate
-                            # for each boundary grid cell
-                            if not self._config['interpolation']['calcgeospress']:
-                                nf.groups[grpk] = extract(grp, [coordstr], gridded = False)
-
-                        for grpk in nonsrcgrps:
-                            # Unused groups are explicitly
-                            # removed
-                            del nf.groups[grpk]
+                        import pdb; pdb.set_trace()
+                        nf = nf.tooutcoords(coordstr, self.vert_out, sources)
                         
-                    elif isinstance(nf, (Dataset, NetCDFFile, METBDY3D, METCRO3D, PseudoNetCDFFile)):
-                        ## Dataset and NetCDFFile could have groups,
-                        ## but that is not treated at this time.
-                        
-                        # If needs interpolation, first extract unique points
-                        # then interpolate, then repeat unique points for
-                        # all boundary points
-                        if isinstance(nf, (METBDY3D, METCRO3D)):
-                            tmpnf = getvarpnc(nf, ['PRES'])
-                            tmpnf = convolve_dim(tmpnf, 'TSTEP,valid,0.5,0.5')
-                            self.met_vert_out = met_vert_out = tmpnf.variables['PRES'][:]
-                            met_vaxis = list(tmpnf.variables['PRES'].dimensions).index('LAY')
-                        else:
-                            nf = extract(nf, [coordstr], unique = True)
-                            if needsvinterp:
-                                if 'LAY' in nf.dimensions:
-                                    nf = interpvars(nf, weights = weights, dimension = 'LAY')
-                                else:
-                                    nf = interpvars(nf, weights = weights, dimension = 'layer47')
-                            nf = extract(nf, [coordstr], gridded = False)
+                    elif isinstance(nf, (METBDY3D, METCRO3D)):
+                        # Assuming METBDY and METCRO3D are target coordinates
+                        pass
                     else:
                         raise IOError('Unknown type %s; add type to readers' % type(nf))
                 
@@ -614,7 +564,7 @@ def pres_from_sigma(sigma, pref, ptop, avg = False):
         pres = pres[:-1] + np.diff(pres) / 2.
     return pres
     
-def get_vert_in(nf, pref, vgtop, calcgeospress = False):
+def get_vert(nf, pref, vgtop, calcgeospress = False):
     """
     Calculates a pressure coordinate
     from sigma coordinates in a netcdf-like
@@ -625,22 +575,32 @@ def get_vert_in(nf, pref, vgtop, calcgeospress = False):
     #        vert_in = nf.variables['PRES'][:]
     #    elif hasattr(nf, 'VGLVLS'):
     #        vert_in = pres_from_sigma(nf.VGLVLS, pref, vgtop, avg = True)
-    if hasattr(nf, 'VGLVLS'):
+    if 'PRES' in nf.variables.keys():
+        vaxis = 1
+        vert_in = nf.variables['PRES'][:]
+    elif hasattr(nf, 'VGLVLS'):
         vert_in = pres_from_sigma(nf.VGLVLS, pref, vgtop, avg = True)
+        vaxis = 0
     elif 'sigma-mid' in nf.variables.keys():
         sigma = np.array(nf.variables['sigma-mid'])
         # assuming VGTOP of model is consistent with
         # VGTOP of profile
         vert_in = pres_from_sigma(sigma, pref, vgtop)
+        vaxis = 0
     elif calcgeospress:
         if 'PEDGE-\$_PSURF' in nf.variables.keys():
-            vert_in = nf.variables['PEDGE-\$_PSURF'][:]
+            vert_in = nf.variables['PEDGE-\$_PSURF'][:] * 100.
+            vaxis = 1
+        elif 'PSURF' in nf.variables.keys():
+            vert_in = nf.variables['PSURF'][:] * 100.
+            vaxis = 1
         elif 'TIME-SER_AIRDEN' in nf.variables.keys() and 'DAO-3D-$_TMPU' in nf.variables.keys():
             warn('Calculating pressure from Air Density and Temperature')
             airden = nf.variables['TIME-SER_AIRDEN'][:] * 1e6
             temperature = nf.variables['DAO-3D-$_TMPU'][:]
             from scipy.constants import Avogadro, R
             vert_in = (airden / Avogadro * temperature * R)
+            vaxis = 1
         else:
             raise ValueError('Could not find geos pressure; disable calculation of pressure.')
     elif 'etam_pressure' in nf.variables.keys():
@@ -660,10 +620,11 @@ def get_vert_in(nf, pref, vgtop, calcgeospress = False):
             vert_in = layerv[:] * 100.
         else:
             raise ValueError('Not sure how to process unit %s; need millibar, hPa or Pa' % punit)
+        vaxis = 0
             
     else:
         raise KeyError('No sigma-mid or layer in %s' % str(nf.variables.keys()))
-    return vert_in
+    return vaxis, vert_in
 
 def profile_to_ftype(nf, ncols, nrows, ftype):
     if ftype == 2:
