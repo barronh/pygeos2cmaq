@@ -66,7 +66,15 @@ def plot(paths, keys = ['O3'], func = 'mean', map = True, prefix = 'BC', scale =
     rcParams['text.usetex'] = False
     from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, LogNorm
     if len(paths) == 1:
-        f = Dataset(paths[0])
+        try:
+            f = Dataset(paths[0])
+        except:
+            from PseudoNetCDF.camxfiles.Memmaps import lateral_boundary
+            lbf = lateral_boundary(paths[0])
+            lbf.VGLVLS = np.arange(f.NLAYS + 1)[::-1]
+            sigma = True
+            
+            import pdb; pdb.set_trace()
     else:
         f = MFDataset(paths)
     try:
