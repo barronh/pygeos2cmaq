@@ -5,5 +5,12 @@ src/pygeos2cmaq/*.nc
 src/pygeos2cmaq/*.yaml
 src/pygeos2cmaq/*.pdf
 build/*
+test/tpcore/METBDY3D_Benchmark_TP
+test/tpcore/METCRO3D_Benchmark_TP
+test/tpcore/geos2cmaq.bcon.20060801.check.nc
+test/tpcore/geos2cmaq.bcon.20060801.nc
+test/tpcore/geos2cmaq.icon.20060801.check.nc
+test/tpcore/geos2cmaq.icon.20060801.nc
+test/tpcore/BC.TEST.20060801
 *.png
 *.log
