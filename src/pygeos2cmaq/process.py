@@ -10,7 +10,7 @@ from readers import *
 from timeformatters import *
 from fast_interp import get_interp_w
 from PseudoNetCDF import PseudoNetCDFFile, interpvars, Pseudo2NetCDF, PseudoNetCDFVariable
-from PseudoNetCDF.core import convolve_dim
+from PseudoNetCDF.core import convolve_dim, merge
 
 from myio import myio
 myioo = myio()
@@ -425,6 +425,7 @@ class file_getter(object):
             nrows = len(outf.dimensions['ROW'])
             ncols = len(outf.dimensions['COL'])
             shape = [ntimes, nlays, nrows, ncols]
+        self.vgtop = outf.VGLVLS[0] * 101325.
         self.vert_out = getsigmafromvglvls(outf, shape = shape, layeraxis = 1)
         
     def get_files(self, date):
@@ -468,7 +469,6 @@ class file_getter(object):
         # path (p)
         for fi, (r, p) in enumerate(file_paths):
             print fi, r, p, eval(r)
-            import pdb; pdb.set_trace()
             # If last path is this path
             # no need to update
             lp = self.last_file_paths[fi]
@@ -514,8 +514,7 @@ class file_getter(object):
                         ## Only extract groups that are used
                         ## in mappings, and only extract variables
                         ## in those groups that are used
-                        import pdb; pdb.set_trace()
-                        nf = nf.tooutcoords(coordstr, self.vert_out, sources)
+                        nf = nf.tooutcoords(coordstr, self.vert_out, self.vgtop, sources)
                         
                     elif isinstance(nf, (METBDY3D, METCRO3D)):
                         # Assuming METBDY and METCRO3D are target coordinates
