@@ -1,22 +1,22 @@
-from optparse import OptionParser
+from argparse import ArgumentParser
 from glob import glob
 import os
 from warnings import warn
 
 def run():
     defaultmech = "%s/mapping/cb05cl_ae6_aq.csv" % os.path.dirname(__file__)
-    parser = OptionParser()
-    parser.set_usage("Usage: %prog [-tq] \n"+(" "*16)+" [-i <init name>] [-f <final name>] <yamlfile>")
-    parser.add_option("-t", "--template", dest = "template", action = "store_true", default = False, help="Output template on standard out (configurable with -m and -c", metavar="Template")
+    parser = ArgumentParser(description = "Usage: %prog [-tq] \n"+(" "*16)+" [-i <init name>] [-f <final name>] <yamlfile>")
+    parser.add_argument("-t", "--template", dest = "template", action = "store_true", default = False, help="Output template on standard out (configurable with -m and -c")
 
-    parser.add_option("-v", "--verbose", dest = "verbose", action = "count", default = 0, help = "extra output for debugging", metavar = "VERBOSE")
+    parser.add_argument("-v", "--verbose", dest = "verbose", action = "count", default = 0, help = "extra output for debugging")
     
     paths = glob(os.path.join(os.path.dirname(__file__), 'mapping', '*_*.csv'))
     mechanisms = ', '.join(['_'.join(path.split('/')[-1].split('_')[:])[:-4] for path in paths])
-    parser.add_option("-c", "--configuration", dest="configuration", default = None,
-                        help = "Chemical mechanisms: %s (for use with -t)" % mechanisms, metavar="CONFIG")
-
-    (options, args) = parser.parse_args()
+    parser.add_argument("-c", "--configuration", dest="configuration", default = None,
+                        help = "Chemical mechanisms: %s (for use with -t)" % mechanisms)
+    parser.add_argument('configfile')
+    options = parser.parse_args()
+    args = [options.configfile]
     if options.template:
         from template import template
         if options.configuration is None:
