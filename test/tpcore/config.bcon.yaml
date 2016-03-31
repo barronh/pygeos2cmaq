@@ -74,6 +74,6 @@ mappings:
   - ['PROFILE', 'FACD', 'FACD', 'ppmV']
 
 interpolation:
-    extrapolate: False
+    extrapolate: True
     log: False
     calcgeospress: False
